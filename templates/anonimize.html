@@ -1,0 +1,145 @@
+{% extends "home.html" %}
+
+{% block content %}
+    {% if success == 1 %}
+        <style>
+            .table th, .table td {
+                width: 200px;  /* Ajusta el valor según sea necesario */
+                text-align: left;
+            }
+            .hidden {
+                display: none; /* Clase para ocultar elementos */
+            }
+        </style>
+
+        <div id="tabla-container">
+            <table border="1" class="table table-hover">
+                <tbody>
+                    {% for field, value in dicom_series.items() %}
+                        <!-- Encabezado para cada campo -->
+                        <tr id="header_{{ field }}">
+                            <th colspan="3">{{ field }}</th> <!-- colspan="3" para que ocupe todas las columnas -->
+                        </tr>
+                        <!-- Fila para cada campo -->
+                        <tr id="row_{{ field }}">
+                            <td>
+                                <!-- Mostrar el valor original de cada campo -->
+                                {{ value }}
+                            </td>
+                            <td>
+                                <!-- Columna para que el usuario pueda introducir el valor actualizado -->
+                                <input type="text" name="{{ unique_id }}_{{ field }}" value="Anonimo" placeholder="Actualizar {{ field }}">
+                            </td>
+                            <td>
+                                <!-- Botón para excluir el campo -->
+                                <button type="button" class="btn btn-danger" onclick="excluirCampo('{{ field }}')">Excluir</button>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Botones -->
+        <div id="botones-container">
+            <button type="button" class="btn btn-secondary" onclick="guardarCambios()">Guardar cambios</button>
+            <button type="button" class="btn btn-outline-secondary" onclick="exportarDicom()">Exportar Dicom anonimizado</button>
+        </div>
+
+        <!-- Mensaje cuando se excluyen todos los atributos -->
+        <div id="mensaje-todos-excluidos" class="hidden">
+            <h3>Has excluido todos los atributos</h3>
+        </div>
+
+    {% else %}
+        <h1>Carga primero un archivo</h1>
+    {% endif %}
+
+    <!-- Script para manejar la exclusión de campos -->
+    <script>
+        function excluirCampo(field) {
+            // Eliminar la fila correspondiente al campo
+            const row = document.getElementById(`row_${field}`);
+            if (row) {
+                row.remove(); // Elimina la fila de la tabla
+            }
+
+            // Eliminar el encabezado correspondiente al campo
+            const header = document.getElementById(`header_${field}`);
+            if (header) {
+                header.remove(); // Elimina el encabezado de la tabla
+            }
+
+            // Verificar si quedan campos en la tabla
+            verificarCamposRestantes();
+        }
+
+        function verificarCamposRestantes() {
+            // Contar cuántas filas quedan en la tabla
+            const filasRestantes = document.querySelectorAll("#tabla-container tr").length;
+
+            // Si no quedan filas, ocultar los botones y mostrar el mensaje
+            if (filasRestantes === 0) {
+                document.getElementById("botones-container").classList.add("hidden");
+                document.getElementById("mensaje-todos-excluidos").classList.remove("hidden");
+            }
+        }
+
+        let cambiosAnonimizacion = {};  // Almacenar los cambios realizados por el usuario
+
+    function guardarCambios() {
+        // Recorrer todas las cajas de texto y guardar los valores en el objeto cambiosAnonimizacion
+        const inputs = document.querySelectorAll('input[type="text"]');
+        inputs.forEach(input => {
+            const field = input.name.split('_')[1];  // Extraer el nombre del campo
+            const nuevoValor = input.value.trim();   // Obtener el valor ingresado por el usuario
+            if (nuevoValor !== "") {
+                cambiosAnonimizacion[field] = nuevoValor;  // Guardar el cambio
+            }
+        });
+
+        // Enviar los cambios al servidor
+        fetch('/guardar_cambios', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ cambios: cambiosAnonimizacion }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log("Cambios guardados:", data);
+            alert("Cambios guardados correctamente.");
+        })
+        .catch(error => {
+            console.error("Error al guardar cambios:", error);
+            alert("Hubo un error al guardar los cambios.");
+        });
+    }
+    function exportarDicom() {
+        // Solicitar al servidor que prepare los archivos anonimizados
+        fetch('/exportar_dicom', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        })
+        .then(response => response.blob())  // Recibir el archivo ZIP como un blob
+        .then(blob => {
+            // Crear un enlace temporal para descargar el archivo ZIP
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'archivos_anonimizados.zip';  // Nombre del archivo ZIP
+            document.body.appendChild(a);
+            a.click();  // Simular clic en el enlace para iniciar la descarga
+            document.body.removeChild(a);  // Eliminar el enlace temporal
+            window.URL.revokeObjectURL(url);  // Liberar memoria
+        })
+        .catch(error => {
+            console.error("Error al exportar archivos:", error);
+            alert("Hubo un error al exportar los archivos.");
+        });
+    }
+    </script>
+{% endblock %}

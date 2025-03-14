@@ -1,0 +1,13 @@
+{%extends "home.html"%}
+
+{% block content %}
+
+<h1>Cargar archivos DICOM</h1>
+<form method="POST" enctype="multipart/form-data">
+    <div class="input-group">
+        <input type="file" name="folder" class="form-control" id="inputGroupFile04" aria-describedby="inputGroupFileAddon04" aria-label="Upload" webkitdirectory directory multiple>
+        <button class="btn btn-outline-secondary" type="submit" id="inputGroupFileAddon04">Subir y ordenar</button>
+      </div>    
+</form>
+
+{% endblock %}

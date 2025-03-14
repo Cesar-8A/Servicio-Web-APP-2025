@@ -1,0 +1,52 @@
+{% extends "home.html" %}
+
+{% block content %}
+    {% if success == 0 %}
+        <h1>Carga primero una imagen</h1>
+    {% else %}
+        <h1>Visualizacion DICOM</h1>
+        <p>Renderizado de la imagen cargada.</p>
+        <!-- Contenedor para el iframe con estilo centrado y borde grueso -->
+        <div style="width: 400px; margin: 0 auto; padding: 10px; border: dotted 5px  black;">
+            <iframe src="http://127.0.0.1:5010/panel" id="DicomRender" width="400" height="500" style="border: 5px steelblue;"></iframe>
+        </div>
+
+        <div>
+            <h2>Subir RT Struct (NRRD)</h2>
+            <form action="/upload_RT" method="post" enctype="multipart/form-data">
+                <input type="file" name="file" accept=".nrrd">
+                <button type="submit">Subir</button>
+            </form>
+
+            
+        </div>
+
+        <script>
+            /*const renderRT = "{{render}}";
+            console.log(renderRT);
+            // Mostrar u ocultar el div según el valor de la variable
+            if (renderRT === "RT") {
+                console.log("XXDD");
+                RT.style.display = 'block';  // Mostrar el div
+            } else {
+                console.log("NOOO");
+                RT.style.display = 'none';   // Ocultar el div
+            }*/
+        </script>
+        <script>
+            document.getElementById("uploadForm").addEventListener("submit", function(event) {
+                event.preventDefault();  // Evita que la página se recargue
+
+                let formData = new FormData(this);  // Captura los datos del formulario
+
+                fetch("/upload_RT", {
+                    method: "POST",
+                    body: formData
+                });
+
+                // Opcional: Mostrar un mensaje sin esperar respuesta
+                alert("Archivo cargado.");
+            });
+        </script>
+    {% endif %}
+{% endblock %}
