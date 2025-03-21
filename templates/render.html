@@ -29,6 +29,58 @@
                     </form>
                 </div>
             </div>
+
+            <!-- Codigo para cargar visualizacion 2D en 3 planos -->
+            <div>
+                <h3>Vista Axial</h3>
+                <input type="range" id="slider_axial" min="0" max="{{ max_value_axial }}" step="1" value="{{max_value_axial//2}}" />
+                <input type="number" id="number_axial" min="0" max="{{ max_value_axial }}" step="1" value="{{max_value_axial//2}}" />
+                <img id="image_axial" src="/image/axial/0" alt="Vista Axial" width="500" />
+              </div>
+            
+              <div>
+                <h3>Vista Sagital</h3>
+                <input type="range" id="slider_sagital" min="0" max="{{ max_value_sagital }}" step="1" value="{{max_value_sagital//2}}" />
+                <input type="number" id="number_sagital" min="0" max="{{ max_value_sagital }}" step="1" value="{{max_value_sagital//2}}" />
+                <img id="image_sagital" src="/image/sagital/0" alt="Vista Sagital" width="500" />
+              </div>
+            
+              <div>
+                <h3>Vista Coronal</h3>
+                <input type="range" id="slider_coronal" min="0" max="{{ max_value_coronal }}" step="1" value="{{max_value_coronal//2}}" />
+                <input type="number" id="number_coronal" min="0" max="{{ max_value_coronal }}" step="1" value="{{max_value_coronal//2}}" />
+                <img id="image_coronal" src="/image/coronal/0" alt="Vista Coronal" width="500" />
+              </div>
+              
+              <script>
+                function setupSlider(view) {
+                  const slider = document.getElementById(`slider_${view}`);
+                  const number = document.getElementById(`number_${view}`);
+                  const image = document.getElementById(`image_${view}`);
+            
+                  function updateImage(layer) {
+                    image.src = `/image/${view}/${layer}?t=${new Date().getTime()}`;
+                  }
+            
+                  slider.addEventListener('input', () => {
+                    number.value = slider.value;
+                    updateImage(slider.value);
+                  });
+            
+                  number.addEventListener('input', () => {
+                    let val = Number(number.value);
+                    if (val < slider.min) val = slider.min;
+                    if (val > slider.max) val = slider.max;
+                    slider.value = val;
+                    updateImage(val);
+                  });
+                }
+            
+                setupSlider('axial');
+                setupSlider('sagital');
+                setupSlider('coronal');
+              </script>
+    
         {% endif %}
     </div>
 

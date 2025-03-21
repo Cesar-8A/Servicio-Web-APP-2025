@@ -16,7 +16,7 @@ from dash import html, dcc, Input, Output, State
 import dash_vtk
 from dash_extensions.enrich import DashProxy, MultiplexerTransform
 
-os.chdir("C:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
+os.chdir("C:/Users/Alber/OneDrive/Escritorio/flask test/v2")
 
 app = Flask(__name__)
 
