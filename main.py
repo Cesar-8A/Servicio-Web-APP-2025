@@ -310,26 +310,49 @@ def render(render):
 
     return render_template("render.html", success=(lambda: 0 if type(panel_vtk)==None else 1), render=render, max_value_axial=app.config['Image'].shape[0]-1 , max_value_sagital=app.config['Image'].shape[1]-1 , max_value_coronal=app.config['Image'].shape[2]-1)  # Tamaño fijo o dinámico
 
-#Function to plot 2D image
+
 @app.route('/image/<view>/<int:layer>')
 def get_image(view, layer):
+    image = app.config['Image']
+    unique_id = app.config["unique_id"]
+
+    # Aplicar Rescale Slope e Intercept
+    slope = app.config['dicom_series'][unique_id]["RescaleSlope"]
+    intercept = app.config['dicom_series'][unique_id]["RescaleIntercept"]
+    image = image * slope + intercept
+
+    # Obtener el espaciado
+    slice_thickness = app.config['dicom_series'][unique_id]["SliceThickness"]
+    pixel_spacing = app.config['dicom_series'][unique_id]["PixelSpacing"]
+
     if view == 'axial':
-        image = app.config['Image'][layer, :, :]
+        slice_img = image[layer, :, :]
     elif view == 'sagital':
-        image = app.config['Image'][:, layer, :]
+        slice_img = image[:, layer, :]
     elif view == 'coronal':
-        image = app.config['Image'][:, :, layer]
+        slice_img = image[:, :, layer]
     else:
         return "Vista no válida", 400
 
+    # Ajuste del espaciado a proporciones reales
+    if view == 'axial':
+        aspect_ratio = pixel_spacing[1] / pixel_spacing[0]
+    elif view == 'sagital':
+        aspect_ratio = slice_thickness / pixel_spacing[0]
+    elif view == 'coronal':
+        aspect_ratio = slice_thickness / pixel_spacing[1]
+
+    # Ajustar y mostrar la imagen
     plt.figure(figsize=(6, 6))
-    plt.imshow(image, cmap='gray')
+    plt.imshow(slice_img, cmap='gray', aspect=aspect_ratio)
     plt.axis('off')
+
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
     plt.close()
     buf.seek(0)
     return send_file(buf, mimetype='image/png')
+
 
 
 
