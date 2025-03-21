@@ -1,54 +1,58 @@
 {% extends "home.html" %}
 
 {% block content %}
-    <h1>Resultados de los archivos DICOM</h1>
-    <table border="1" class="table table-dark table-hover">
-        <thead>
-            <tr>
-                <th>Paciente</th>
-                <th>Tipo</th>
-                <th>Dimensiones</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for unique_id, info in dicom_series.items() %}
-            <tr id="{{ unique_id }}" onclick="loadDicomMetadata('{{ unique_id }}')">
-                <td>{{ info['paciente'] }}</td>
-                <td>{{ info['tipo'] }}</td>
-                <td>{{ info['dimensiones'] }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="container mt-4 text-center">
+        <div class="card bg-dark text-light shadow-lg p-4 border-0 rounded-3">
+            <h1 class="mb-4">Resultados de los archivos DICOM</h1>
+            
+            <div class="table-responsive">
+                <table class="table table-hover table-bordered align-middle text-center">
+                    <thead class="table-secondary text-dark">
+                        <tr>
+                            <th>Paciente</th>
+                            <th>Tipo</th>
+                            <th>Dimensiones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for unique_id, info in dicom_series.items() %}
+                        <tr id="{{ unique_id }}" onclick="loadDicomMetadata('{{ unique_id }}')" class="clickable-row">
+                            <td>{{ info['paciente'] }}</td>
+                            <td>{{ info['tipo'] }}</td>
+                            <td>{{ info['dimensiones'] }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
 
-    <!-- Div para mostrar la selección y el botón de aceptar -->
-    <div id="selectionContainer" style="display: none; margin-top: 20px;">
-        <p id="selectedText"></p>
-        <button id="acceptButton" class="btn btn-light" onclick="acceptSelection()">Aceptar</button>
+            <!-- Selección del paciente -->
+            <div id="selectionContainer" class="mt-4 d-none">
+                <p id="selectedText" class="lead"></p>
+                <button id="acceptButton" class="btn btn-success btn-lg shadow-sm" onclick="acceptSelection()">
+                    <i class="bi bi-check-circle"></i> Aceptar
+                </button>
+            </div>
+        </div>
     </div>
 
     <script>
-        let selectedId = null;  // Almacena el ID seleccionado
-
+        let selectedId = null;  
 
         function loadDicomMetadata(unique_id) {
-            // Enviar una solicitud al servidor para cargar los metadatos
             fetch(`/loadDicomMetadata/${unique_id}`)
                 .then(response => response.json())
                 .then(data => {
                     console.log("Metadatos cargados:", data.metadata);
 
-                    // Mostrar el texto con el ID del paciente
                     document.getElementById("selectedText").innerText = "Paciente seleccionado: " + data.metadata;
-                    document.getElementById("selectionContainer").style.display = "block";
+                    document.getElementById("selectionContainer").classList.remove("d-none");
                     
-                    // Guardar el ID seleccionado
                     selectedId = unique_id;
 
-                    // Reiniciar el botón a "Aceptar"
                     let acceptButton = document.getElementById("acceptButton");
-                    acceptButton.innerText = "Aceptar";
-                    acceptButton.disabled = false; // Habilitar el botón en caso de otra selección
+                    acceptButton.innerHTML = '<i class="bi bi-check-circle"></i> Aceptar';
+                    acceptButton.disabled = false; 
                 })
                 .catch(error => console.error("Error:", error));
         }
@@ -60,25 +64,22 @@
             }
 
             let acceptButton = document.getElementById("acceptButton");
-            acceptButton.innerText = "Procesando...";
+            acceptButton.innerHTML = '<i class="bi bi-hourglass-split"></i> Procesando...';
             acceptButton.disabled = true;
 
-            // Enviar el ID seleccionado al servidor con POST
             fetch('/process_selected_dicom', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ unique_id: selectedId }) // Enviamos el ID como JSON
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ unique_id: selectedId }) 
             })
             .then(response => response.json())
             .then(data => {
                 console.log("Respuesta del servidor:", data);
-                acceptButton.innerText = "Listo";  // Cambiar el texto del botón
+                acceptButton.innerHTML = '<i class="bi bi-check-lg"></i> Listo';  
             })
             .catch(error => {
                 console.error("Error:", error);
-                acceptButton.innerText = "Aceptar";  // Restaurar en caso de error
+                acceptButton.innerHTML = '<i class="bi bi-check-circle"></i> Aceptar';  
                 acceptButton.disabled = false;
             });
         }

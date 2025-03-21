@@ -1,4 +1,4 @@
-#Python rama de Chuy prueba flaskkkkkk
+#Python
 from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, Response
 import tempfile
 import zipfile
@@ -15,7 +15,7 @@ from dash import html, dcc, Input, Output, State
 import dash_vtk
 from dash_extensions.enrich import DashProxy, MultiplexerTransform
 
-os.chdir("c:\Users\jesus\Desktop\Cucei\SERVICIO\Servicio-Web-APP-2025")
+os.chdir("C:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
 
 app = Flask(__name__)
 
