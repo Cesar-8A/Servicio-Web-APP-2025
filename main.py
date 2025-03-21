@@ -1,4 +1,3 @@
-#Python
 from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, Response
 import tempfile
 import zipfile
@@ -9,6 +8,8 @@ import panel as pn
 import os
 import pydicom
 import nrrd
+import matplotlib.pyplot as plt
+import io
 
 import dash
 from dash import html, dcc, Input, Output, State
@@ -307,7 +308,30 @@ def render(render):
         panel_vtk = create_render()
         start_bokeh_server(panel_vtk)
 
-    return render_template("render.html", success=(lambda: 0 if type(panel_vtk)==None else 1), render=render)  # Tamaño fijo o dinámico
+    return render_template("render.html", success=(lambda: 0 if type(panel_vtk)==None else 1), render=render, max_value_axial=app.config['Image'].shape[0]-1 , max_value_sagital=app.config['Image'].shape[1]-1 , max_value_coronal=app.config['Image'].shape[2]-1)  # Tamaño fijo o dinámico
+
+#Function to plot 2D image
+@app.route('/image/<view>/<int:layer>')
+def get_image(view, layer):
+    if view == 'axial':
+        image = app.config['Image'][layer, :, :]
+    elif view == 'sagital':
+        image = app.config['Image'][:, layer, :]
+    elif view == 'coronal':
+        image = app.config['Image'][:, :, layer]
+    else:
+        return "Vista no válida", 400
+
+    plt.figure(figsize=(6, 6))
+    plt.imshow(image, cmap='gray')
+    plt.axis('off')
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
+    plt.close()
+    buf.seek(0)
+    return send_file(buf, mimetype='image/png')
+
+
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {"nrrd"} #Añadir aqui mas extensiones permitidas para RT Struct
