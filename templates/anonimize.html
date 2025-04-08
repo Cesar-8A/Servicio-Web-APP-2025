@@ -2,76 +2,51 @@
 
 {% block content %}
 {% if success == 1 %}
-    <style>
-        .table th, .table td {
-            width: 200px;
-            text-align: left;
-            vertical-align: middle;
-        }
-        .hidden {
-            display: none;
-        }
-        #tabla-container {
-            margin-bottom: 20px;
-        }
-        #botones-container {
-            margin-top: 20px;
-            text-align: center;
-        }
-        .btn-custom {
-            width: 220px;
-            margin: 10px;
-            padding: 10px;
-            font-size: 16px;
-        }
-    </style>
 
-    <div id="tabla-container" class="table-responsive">
-        <table class="table table-dark table-hover table-bordered shadow-lg">
-            <thead>
-                <tr class="bg-secondary text-light">
-                    <th>Campo</th>
-                    <th>Valor actualizado</th>
-                    <th>Acciones</th>
+<div id="tabla-container" class="table-responsive">
+    <table class="table table-hover table-bordered shadow-lg">
+        <thead>
+            <tr>
+                <th>Campo</th>
+                <th>Valor actualizado</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for field, value in dicom_series.items() %}
+                <tr id="header_{{ field }}">
+                    <td colspan="3" style="background-color: #e5e5e5; color: #002060;"><strong>{{ field }}</strong></td>
                 </tr>
-            </thead>
-            <tbody>
-                {% for field, value in dicom_series.items() %}
-                    <tr id="header_{{ field }}">
-                        <td colspan="3" class="bg-secondary text-white"><strong>{{ field }}</strong></td>
-                    </tr>
-                    <tr id="row_{{ field }}">
-                        <td><strong>{{ value }}</strong></td>
-                        <td>
-                            <input type="text" class="form-control bg-dark text-light border-0 shadow-sm"
-                                name="{{ unique_id }}_{{ field }}" value="Anonimo" placeholder="Actualizar {{ field }}">
-                        </td>
-                        <td>
-                            <button type="button" class="btn btn-danger btn-sm shadow-sm" onclick="excluirCampo('{{ field }}')">
-                                <i class="bi bi-x-circle"></i> Excluir
-                            </button>
-                        </td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+                <tr id="row_{{ field }}">
+                    <td><strong>{{ value }}</strong></td>
+                    <td>
+                        <input type="text" class="form-control" name="{{ unique_id }}_{{ field }}" value="Anonimo" placeholder="Actualizar {{ field }}">
+                    </td>
+                    <td>
+                        <button type="button" class="btn btn-danger btn-sm shadow-sm" onclick="excluirCampo('{{ field }}')">
+                            <i class="bi bi-x-circle"></i> Excluir
+                        </button>
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
 
-    <!-- Botones -->
-    <div id="botones-container">
-        <button type="button" class="btn btn-secondary text-light btn-custom shadow-sm" onclick="guardarCambios()">
-            <i class="bi bi-save"></i> Guardar cambios
-        </button>
-        <button type="button" class="btn btn-success text-light btn-custom shadow-sm" onclick="exportarDicom()">
-            <i class="bi bi-download"></i> Exportar DICOM anonimizado
-        </button>
-    </div>
-    
+<!-- Botones -->
+<div id="botones-container">
+    <button type="button" class="btn btn-secondary text-light btn-custom shadow-sm" onclick="guardarCambios()">
+        <i class="bi bi-save"></i> Guardar cambios
+    </button>
+    <button type="button" class="btn btn-success text-light btn-custom shadow-sm" onclick="exportarDicom()">
+        <i class="bi bi-download"></i> Exportar DICOM anonimizado
+    </button>
+</div>
 
-    <!-- Mensaje cuando se excluyen todos los atributos -->
-    <div id="mensaje-todos-excluidos" class="hidden">
-        <h3 class="text-center text-light">Has excluido todos los atributos</h3>
-    </div>
+<!-- Mensaje cuando se excluyen todos los atributos -->
+<div id="mensaje-todos-excluidos" class="hidden">
+    <h3 class="text-center">Has excluido todos los atributos</h3>
+</div>
 
 {% else %}
     <h1 class="text-center text-light">Carga primero un archivo</h1>

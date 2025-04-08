@@ -2,12 +2,12 @@
 
 {% block content %}
     <div class="container mt-4 text-center">
-        <div class="card bg-dark text-light shadow-lg p-4 border-0 rounded-3">
-            <h1 class="mb-4">Resultados de los archivos DICOM</h1>
+        <div class="card shadow-lg p-4 border-2 rounded-3" style="background-color: #ffffffdd; border-color: #002060;">
+            <h1 class="mb-4" style="color: #002060;">Resultados de los archivos DICOM</h1>
             
             <div class="table-responsive">
-                <table class="table table-hover table-bordered align-middle text-center">
-                    <thead class="table-secondary text-dark">
+                <table class="table table-hover table-bordered align-middle text-center" style="background-color: #ffffffcc;">
+                    <thead style="background-color: #002060; color: #ffffff;">
                         <tr>
                             <th>Paciente</th>
                             <th>Tipo</th>
@@ -16,10 +16,10 @@
                     </thead>
                     <tbody>
                         {% for unique_id, info in dicom_series.items() %}
-                        <tr id="{{ unique_id }}" onclick="loadDicomMetadata('{{ unique_id }}')" class="clickable-row">
-                            <td>{{ info['paciente'] }}</td>
-                            <td>{{ info['tipo'] }}</td>
-                            <td>{{ info['dimensiones'] }}</td>
+                        <tr id="{{ unique_id }}" onclick="loadDicomMetadata('{{ unique_id }}')" class="clickable-row" style="cursor: pointer;">
+                            <td style="color: #002060;">{{ info['paciente'] }}</td>
+                            <td style="color: #002060;">{{ info['tipo'] }}</td>
+                            <td style="color: #002060;">{{ info['dimensiones'] }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -28,8 +28,10 @@
 
             <!-- Selección del paciente -->
             <div id="selectionContainer" class="mt-4 d-none">
-                <p id="selectedText" class="lead"></p>
-                <button id="acceptButton" class="btn btn-success btn-lg shadow-sm" onclick="acceptSelection()">
+                <p id="selectedText" class="lead" style="color: #002060;"></p>
+                <button id="acceptButton" class="btn btn-lg shadow-sm"
+                        style="background-color: #B10202; color: white; border: none;"
+                        onclick="acceptSelection()">
                     <i class="bi bi-check-circle"></i> Aceptar
                 </button>
             </div>

@@ -5,59 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Servicio Social Imagenología</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/udg_estilos.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
-    <style>
-        .contenedor {
-            max-width: 500px;
-            margin: 30px auto;
-            padding: 20px;
-            border: 3px solid steelblue;
-            border-radius: 10px;
-            background-color: #f8f9fa;
-            box-shadow: 3px 3px 10px rgba(0, 0, 0, 0.1);
-            text-align: center;
-        }
-
-        iframe {
-            border: 3px solid steelblue;
-            border-radius: 5px;
-        }
-
-        button {
-            background-color: steelblue;
-            color: white;
-            border: none;
-            padding: 10px 15px;
-            font-size: 16px;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: 0.3s;
-        }
-
-        button:hover {
-            background-color: navy;
-        }
-
-        /* Estilo para los elementos del menú desplegable */
-        .dropdown-menu {
-            background-color: #343a40; /* Gris oscuro */
-        }
-
-        .dropdown-item {
-            color: #f8f9fa !important; /* Texto claro */
-        }
-
-        /* Cambio de color al pasar el mouse */
-        .dropdown-item:hover {
-            background-color: #495057 !important; /* Gris más oscuro */
-            color: white !important;
-        }
-
-        /* Línea divisoria más visible */
-        .dropdown-divider {
-            border-color: rgba(255, 255, 255, 0.2);
-        }
-    </style>
+    
+    
 </head>
 <body>
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow">
