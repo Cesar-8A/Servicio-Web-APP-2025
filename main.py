@@ -16,7 +16,7 @@ from dash import html, dcc, Input, Output, State
 import dash_vtk
 from dash_extensions.enrich import DashProxy, MultiplexerTransform
 
-os.chdir("c:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
+os.chdir("C:/Users/Usuario/OneDrive/flask")
 
 
 app = Flask(__name__)
@@ -43,6 +43,9 @@ app.config["unique_id"] = 0
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
+if not os.path.exists(UPLOAD_FOLDER_NRRD):
+    os.makedirs(UPLOAD_FOLDER_NRRD)    
+
 pn.extension('vtk')  # Activar la extensión VTK de Panel
 
 
@@ -66,7 +69,7 @@ def create_render():
     grid.cell_data["values"] = volume.flatten(order="F")
     # Crear la visualización
     plotter = pv.Plotter()
-    plotter.add_volume(grid, cmap=['green', 'red', 'blue'] ,ambient = 0.5, shade=True, show_scalar_bar = True, opacity="sigmoid_2", )
+    plotter.add_volume(grid, cmap='bone' ,ambient = 0.5, shade=True, show_scalar_bar = True, opacity="sigmoid_2", )
     grid_dicom = grid
     # Usar Panel para mostrar el gráfico de PyVista
     panel_vtk = pn.pane.VTK(plotter.ren_win,  width=400, height=500)
@@ -75,18 +78,36 @@ def create_render():
 
 
 def add_RT_to_plotter():
-    global plotter
-    global grid
-    RT_Image = app.config['RT']
-    # Crear el volumen a partir de los datos de la imagen
-    grid = pv.ImageData()
-    print(RT_Image.shape)
-    grid.dimensions = np.array(RT_Image.shape) + 1
+    global plotter, panel_vtk
 
-    grid.cell_data["values"] = RT_Image.flatten(order="F")    
-    plotter.add_volume(grid, cmap=['green', 'red', 'blue'] ,ambient = 0.5, shade=True, show_scalar_bar = True, opacity="sigmoid_2", )
-    plotter.render()
-    panel_vtk.object = plotter.ren_win 
+    if plotter is None:
+        print("No hay plotter activo.")
+        return
+
+    app.config['RT'] = np.flip(app.config['RT'], axis=(0, 2)) # Voltear las posiciones 1 y 3 para que el 3D quede alineado
+    RT_Image = app.config['RT']
+    RT_Image = RT_Image.transpose(2, 0, 1) # Formato NRRD: (X, Y, Z), cambiar para coincidir con DICOM
+
+    rt_grid = pv.ImageData()
+    rt_grid.dimensions = np.array(RT_Image.shape) + 1
+    # Asignar los mismos origin y spacing del grid de DICOM porque están en el mismo espacio físico
+    rt_grid.origin = grid_dicom.origin
+    rt_grid.spacing = grid_dicom.spacing
+    
+    rt_grid.cell_data["values"] = (RT_Image > 1).astype(np.int16).flatten(order="F")
+
+    plotter.add_volume(
+        rt_grid,
+        cmap='Reds',
+        ambient=0.5,
+        shade=True,
+        show_scalar_bar=True,
+        opacity="sigmoid_5"
+    )
+    
+    plotter.render() # Actualizar el plotter
+    panel_vtk.object = plotter.ren_win # Actualizar el panel
+    return panel_vtk 
 
 
 # Iniciar el servidor Bokeh una sola vez al iniciar la aplicación
@@ -362,6 +383,8 @@ def allowed_file(filename):
 
 @app.route("/upload_RT", methods=["POST"])
 def upload_RT():
+    global panel_vtk, plotter
+
     if 'file' not in request.files:
         return "No se encontró el archivo", 400  # Respuesta de error
 
@@ -370,20 +393,16 @@ def upload_RT():
     if file.filename == '':
         return "Nombre de archivo inválido", 400
 
-    # Guardar el archivo en la carpeta de uploads
-    filepath = os.path.join("uploaded_RT", file.filename)
+    # Guardar el archivo dentro de la ruta segura
+    filepath = os.path.join(UPLOAD_FOLDER_NRRD, file.filename)
     file.save(filepath)
-    app.config['RT'], _ = nrrd.read(filepath)
-    add_RT_to_plotter()
+
     # Leer el archivo NRRD
-    #try:
-    #    app.config['RT'] = nrrd.read(filepath)
-    #    #return jsonify({"message": f"Archivo {file.filename} subido y leído correctamente!"}), 200
-    #    return Response(status=200) 
-    #except Exception as e:
-    #    #return jsonify({"error": f"Error al leer el archivo NRRD: {str(e)}"}), 500
-    #    return Response(status=500)
-    return render_template("render.html", success=(lambda: 0 if type(panel_vtk)==None else 1), render=render) 
+    app.config['RT'], _ = nrrd.read(filepath)
+    
+    # Llamar a la función y actualizar el panel
+    panel_vtk = add_RT_to_plotter()
+    return render_template("render.html", max_value_axial=app.config['Image'].shape[0]-1 , max_value_sagital=app.config['Image'].shape[1]-1 , max_value_coronal=app.config['Image'].shape[2]-1)  # Tamaño fijo o dinámico 
         
 
 @app.route('/loadDicomMetadata/<unique_id>')
