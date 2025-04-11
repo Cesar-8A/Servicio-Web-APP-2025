@@ -16,9 +16,15 @@
 
 </head>
 <body>
-    <!-- Pantalla de carga -->
+    <!-- Pantalla de carga 
+     
     <div id="loader-wrapper">
         <img id="loader-logo" src="{{ url_for('static', filename='img/leones_negros_logo.png') }}" alt="Logo Leones Negros">
+        <p class="text-light mt-3">Cargando...</p>
+    </div>
+    -->
+    <div id="loader-wrapper">
+        <div id="loader"></div>
         <p class="text-light mt-3">Cargando...</p>
     </div>
 
@@ -81,6 +87,7 @@
     <div class="container mt-4 text-center">
         <div class="card shadow p-4">
             {% block content %}
+            
             {% endblock %}
         </div>
     </div>
