@@ -69,6 +69,7 @@ def create_render():
     grid.cell_data["values"] = volume.flatten(order="F")
     # Crear la visualización
     plotter = pv.Plotter()
+    plotter.set_background("black")
     plotter.add_volume(grid, cmap='bone' ,ambient = 0.5, shade=True, show_scalar_bar = True, opacity="sigmoid_2", )
     grid_dicom = grid
     # Usar Panel para mostrar el gráfico de PyVista
