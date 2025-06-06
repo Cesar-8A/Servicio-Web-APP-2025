@@ -65,12 +65,20 @@ def create_render():
     #print(app.config['dicom_series'][unique_id]["PixelSpacing"])
     #print(app.config['dicom_series'][unique_id]["SliceThickness"])
 
-
+    # Asignar los datos binarios como cell_data
     grid.cell_data["values"] = volume.flatten(order="F")
+
+    # Convertir los datos a point_data antes de aplicar .contour()
+    grid = grid.cell_data_to_point_data()
+
+    # Crear superficie desde el binario: transición entre 0 y 1 = isovalor 0.5
+    surface = grid.contour([0.5])
+
     # Crear la visualización
     plotter = pv.Plotter()
     plotter.set_background("black")
-    plotter.add_volume(grid, cmap='bone' ,ambient = 0.5, shade=True, show_scalar_bar = True, opacity="sigmoid_2", )
+    plotter.add_mesh(surface, color="white", smooth_shading=True, ambient=0.3, specular=0.4, specular_power=10)
+
     grid_dicom = grid
     # Usar Panel para mostrar el gráfico de PyVista
     panel_vtk = pn.pane.VTK(plotter.ren_win,  width=400, height=500)
