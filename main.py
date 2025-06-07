@@ -75,14 +75,17 @@ def create_render():
     surface = grid.contour([0.5])
 
     # Crear la visualización
-    plotter = pv.Plotter()
+    plotter = pv.Plotter(off_screen=True) 
     plotter.set_background("black")
     plotter.add_mesh(surface, color="white", smooth_shading=True, ambient=0.3, specular=0.4, specular_power=10)
 
     grid_dicom = grid
+    plotter.view_isometric()
+    plotter.show_axes()
+
     # Usar Panel para mostrar el gráfico de PyVista
     panel_vtk = pn.pane.VTK(plotter.ren_win,  width=400, height=500)
-    
+
     return panel_vtk
 
 
