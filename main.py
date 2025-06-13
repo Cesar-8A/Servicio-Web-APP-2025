@@ -10,6 +10,7 @@ import pydicom
 import nrrd
 import matplotlib.pyplot as plt
 import io
+from scipy.ndimage import label, binary_erosion
 
 import dash
 from dash import html, dcc, Input, Output, State
@@ -52,40 +53,49 @@ pn.extension('vtk')  # Activar la extensión VTK de Panel
 def create_render():
     global plotter
     global grid_dicom
-    volume = ((app.config['Image'] < 200)*1).astype(np.int16) # Asegúrate de que 'Image' es un array NumPy 3D
-
+    
+    volume_bone = ((app.config['Image'] > 175) * 1).astype(np.int16)
+    volume_skin = (((app.config['Image'] > -200) & (app.config['Image'] < 0)) * 1).astype(np.int16)
     unique_id = app.config["unique_id"]
-    # Crear el volumen a partir de los datos de la imagen
-    grid = pv.ImageData()
 
-    grid.dimensions = np.array(volume.shape) + 1
+    origin = app.config['dicom_series'][unique_id]["ImagePositionPatient"]
+    spacing = (
+        app.config['dicom_series'][unique_id]["SliceThickness"],
+        app.config['dicom_series'][unique_id]["PixelSpacing"][0],
+        app.config['dicom_series'][unique_id]["PixelSpacing"][1],
+    )
 
-    grid.origin = app.config['dicom_series'][unique_id]["ImagePositionPatient"]  # The bottom left corner of the data set
-    grid.spacing = (app.config['dicom_series'][unique_id]["SliceThickness"], app.config['dicom_series'][unique_id]["PixelSpacing"][0], app.config['dicom_series'][unique_id]["PixelSpacing"][1])  # These are the cell sizes along each axis
-    #print(app.config['dicom_series'][unique_id]["PixelSpacing"])
-    #print(app.config['dicom_series'][unique_id]["SliceThickness"])
+    # --- BONE GRID ---
+    grid_bone = pv.ImageData()
+    grid_bone.dimensions = np.array(volume_bone.shape) + 1
+    grid_bone.origin = origin
+    grid_bone.spacing = spacing
+    grid_bone.cell_data["values"] = volume_bone.flatten(order="F")
+    grid_bone = grid_bone.cell_data_to_point_data()
+    surface_bone = grid_bone.contour([0.5])
 
-    # Asignar los datos binarios como cell_data
-    grid.cell_data["values"] = volume.flatten(order="F")
-
-    # Convertir los datos a point_data antes de aplicar .contour()
-    grid = grid.cell_data_to_point_data()
-
-    # Crear superficie desde el binario: transición entre 0 y 1 = isovalor 0.5
-    surface = grid.contour([0.5])
-
-    # Crear la visualización
-    plotter = pv.Plotter(off_screen=True) 
+    # --- SKIN GRID ---
+    grid_skin = pv.ImageData()
+    grid_skin.dimensions = np.array(volume_skin.shape) + 1
+    grid_skin.origin = origin
+    grid_skin.spacing = spacing
+    grid_skin.cell_data["values"] = volume_skin.flatten(order="F")
+    grid_skin = grid_skin.cell_data_to_point_data()
+    surface_skin = grid_skin.contour([0.5])
+    
+    # Para usarse después y plotear segmentaciones
+    grid_dicom = grid_skin
+    
+    # --- PLOTTING ---
+    plotter = pv.Plotter(off_screen=True)
     plotter.set_background("black")
-    plotter.add_mesh(surface, color="white", smooth_shading=True, ambient=0.3, specular=0.4, specular_power=10)
+    plotter.add_mesh(surface_bone, color="white", smooth_shading=True, ambient=0.3, specular=0.4, specular_power=10)
+    plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, smooth_shading=True)  # Transparent skin
 
-    grid_dicom = grid
     plotter.view_isometric()
     plotter.show_axes()
 
-    # Usar Panel para mostrar el gráfico de PyVista
-    panel_vtk = pn.pane.VTK(plotter.ren_win,  width=400, height=500)
-
+    panel_vtk = pn.pane.VTK(plotter.ren_win, width=400, height=500)
     return panel_vtk
 
 
@@ -102,20 +112,20 @@ def add_RT_to_plotter():
 
     rt_grid = pv.ImageData()
     rt_grid.dimensions = np.array(RT_Image.shape) + 1
-    # Asignar los mismos origin y spacing del grid de DICOM porque están en el mismo espacio físico
+    
+    # Asignar los mismos origin y spacing del grid de DICOM para estar en el mismo espacio físico
     rt_grid.origin = grid_dicom.origin
     rt_grid.spacing = grid_dicom.spacing
     
-    rt_grid.cell_data["values"] = (RT_Image > 1).astype(np.int16).flatten(order="F")
+    # Asignar segmentación binaria
+    rt_grid.cell_data["values"] = (RT_Image > 1).astype(np.uint8).flatten(order="F")
 
-    plotter.add_volume(
-        rt_grid,
-        cmap='Reds',
-        ambient=0.5,
-        shade=True,
-        show_scalar_bar=True,
-        opacity="sigmoid_5"
-    )
+    # Convertir a point_data para que funcione contour() y Generar superficie con isovalor 0.5
+    rt_grid = rt_grid.cell_data_to_point_data()
+    surface = rt_grid.contour([0.5])
+
+    # Agregar la malla segmentada al plotter
+    plotter.add_mesh(surface, color="red", opacity=0.4, smooth_shading=True, specular=0.3)
     
     plotter.render() # Actualizar el plotter
     panel_vtk.object = plotter.ren_win # Actualizar el panel
