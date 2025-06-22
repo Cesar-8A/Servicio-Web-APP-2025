@@ -51,9 +51,9 @@ pn.extension('vtk')  # Activar la extensión VTK de Panel
 
 
 def create_render():
-    global plotter
-    global grid_dicom
     
+    global plotter, skin_actor, slider, grid_dicom
+
     volume_bone = ((app.config['Image'] > 175) * 1).astype(np.int16)
     volume_skin = (((app.config['Image'] > -200) & (app.config['Image'] < 0)) * 1).astype(np.int16)
     unique_id = app.config["unique_id"]
@@ -65,7 +65,7 @@ def create_render():
         app.config['dicom_series'][unique_id]["PixelSpacing"][1],
     )
 
-    # --- BONE GRID ---
+    # --- HUESO GRID ---
     grid_bone = pv.ImageData()
     grid_bone.dimensions = np.array(volume_bone.shape) + 1
     grid_bone.origin = origin
@@ -74,7 +74,7 @@ def create_render():
     grid_bone = grid_bone.cell_data_to_point_data()
     surface_bone = grid_bone.contour([0.5])
 
-    # --- SKIN GRID ---
+    # --- PIEL GRID ---
     grid_skin = pv.ImageData()
     grid_skin.dimensions = np.array(volume_skin.shape) + 1
     grid_skin.origin = origin
@@ -90,17 +90,28 @@ def create_render():
     plotter = pv.Plotter(off_screen=True)
     plotter.set_background("black")
     plotter.add_mesh(surface_bone, color="white", smooth_shading=True, ambient=0.3, specular=0.4, specular_power=10)
-    plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, smooth_shading=True)  # Transparent skin
+    skin_actor = plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, name="skin", smooth_shading=True)  # Piel transparente
 
     plotter.view_isometric()
     plotter.show_axes()
 
     panel_vtk = pn.pane.VTK(plotter.ren_win, width=400, height=500)
-    return panel_vtk
+
+    # --- SLIDER + CALLBACK ---
+    slider = pn.widgets.FloatSlider(name="Opacidad de la piel", start=0.0, end=1.0, step=0.05, value=0.5)
+
+    def update_opacity(event):  # Actualizar la opacidad de la piel
+        skin_actor.GetProperty().SetOpacity(event.new)
+        panel_vtk.param.trigger('object')
+
+    slider.param.watch(update_opacity, 'value')
+
+    return pn.Column(panel_vtk, slider)
 
 
 def add_RT_to_plotter():
-    global plotter, panel_vtk
+    
+    global plotter, panel_vtk, mask_actor
 
     if plotter is None:
         print("No hay plotter activo.")
@@ -125,11 +136,17 @@ def add_RT_to_plotter():
     surface = rt_grid.contour([0.5])
 
     # Agregar la malla segmentada al plotter
-    plotter.add_mesh(surface, color="red", opacity=0.4, smooth_shading=True, specular=0.3)
-    
+    plotter.add_mesh(surface, color="red", opacity=0.5, smooth_shading=True, specular=0.3)
     plotter.render() # Actualizar el plotter
     panel_vtk.object = plotter.ren_win # Actualizar el panel
-    return panel_vtk 
+
+    def update_opacity(event):  # Actualizar la opacidad de la piel
+        skin_actor.GetProperty().SetOpacity(event.new)
+        panel_vtk.param.trigger('object')
+
+    slider.param.watch(update_opacity, 'value')
+    
+    return pn.Column(panel_vtk, slider)
 
 
 # Iniciar el servidor Bokeh una sola vez al iniciar la aplicación
@@ -424,6 +441,7 @@ def upload_RT():
     
     # Llamar a la función y actualizar el panel
     panel_vtk = add_RT_to_plotter()
+
     return render_template("render.html", max_value_axial=app.config['Image'].shape[0]-1 , max_value_sagital=app.config['Image'].shape[1]-1 , max_value_coronal=app.config['Image'].shape[2]-1)  # Tamaño fijo o dinámico 
         
 
