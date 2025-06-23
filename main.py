@@ -26,7 +26,7 @@ from dash import html, dcc, Input, Output, State
 import dash_vtk
 from dash_extensions.enrich import DashProxy, MultiplexerTransform
 
-os.chdir("c:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
+os.chdir("C:/Users/Usuario/OneDrive/flask")
 
 app = Flask(__name__)
 app.secret_key = "clave_secreta_no_tan_secreta_jeje"
@@ -69,7 +69,9 @@ pn.extension('vtk')  # Activar la extensión VTK de Panel
 
 def create_render():
     
-    global plotter, skin_actor, slider, grid_dicom
+    global plotter, skin_actor, slider, grid_dicom, panel_column
+
+    panel_column = pn.Column() # Contenedor global para actualizaciones dinámicas
 
     volume_bone = ((app.config['Image'] > 175) * 1).astype(np.int16)
     volume_skin = (((app.config['Image'] > -200) & (app.config['Image'] < 0)) * 1).astype(np.int16)
@@ -123,7 +125,9 @@ def create_render():
 
     slider.param.watch(update_opacity, 'value')
 
-    return pn.Column(panel_vtk, slider)
+    panel_column[:] = [panel_vtk, slider]
+
+    return panel_column
 
 
 def add_RT_to_plotter():
@@ -153,17 +157,31 @@ def add_RT_to_plotter():
     surface = rt_grid.contour([0.5])
 
     # Agregar la malla segmentada al plotter
-    plotter.add_mesh(surface, color="red", opacity=0.5, smooth_shading=True, specular=0.3)
-    plotter.render() # Actualizar el plotter
-    panel_vtk.object = plotter.ren_win # Actualizar el panel
-
-    def update_opacity(event):  # Actualizar la opacidad de la piel
+    mask_actor = plotter.add_mesh(surface, color="red", opacity=0.5, smooth_shading=True, specular=0.3)
+    
+    # Actualizar la opacidad de la piel
+    def update_opacity(event):  
         skin_actor.GetProperty().SetOpacity(event.new)
         panel_vtk.param.trigger('object')
-
     slider.param.watch(update_opacity, 'value')
-    
-    return pn.Column(panel_vtk, slider)
+
+    # Apagar y prender máscara
+    toggle_button = pn.widgets.Toggle(name='Mostrar/Ocultar máscara', button_type='danger', value=True)
+
+    def toggle_mask_visibility(event):
+        if event.new:
+            mask_actor.GetProperty().SetOpacity(0.5)
+        else:
+            mask_actor.GetProperty().SetOpacity(0.0)
+          
+    toggle_button.param.watch(toggle_mask_visibility, 'value')
+
+    # Actualizar el plotter y el panel
+    plotter.render() 
+    panel_vtk.object = plotter.ren_win
+    panel_column.append(toggle_button)
+
+    return panel_column
 
 
 # Iniciar el servidor Bokeh una sola vez al iniciar la aplicación
