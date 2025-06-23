@@ -26,7 +26,7 @@ from dash import html, dcc, Input, Output, State
 import dash_vtk
 from dash_extensions.enrich import DashProxy, MultiplexerTransform
 
-#os.chdir("c:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
+os.chdir("c:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
 
 app = Flask(__name__)
 app.secret_key = "clave_secreta_no_tan_secreta_jeje"
