@@ -1,13 +1,22 @@
 from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, Response
+from flask import session, flash
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_wtf import FlaskForm
+from wtforms import StringField, PasswordField, SubmitField
+from wtforms.validators import InputRequired, Length, EqualTo
+
 import tempfile
 import zipfile
 from collections import defaultdict
 import numpy as np
 import pyvista as pv
+pv.OFF_SCREEN = True
 import panel as pn
 import os
 import pydicom
 import nrrd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import io
 
@@ -20,6 +29,15 @@ from dash_extensions.enrich import DashProxy, MultiplexerTransform
 
 
 app = Flask(__name__)
+app.secret_key = "clave_secreta_no_tan_secreta_jeje"
+
+# Inyección global de estado de sesión a todas las plantillas
+@app.context_processor
+def inject_user():
+    return {
+        'user_logged_in': session.get('user_logged_in', False),
+        'user_initials': session.get('user_initials', '')
+    }
 
 #Variables globales
 panel_vtk = None
@@ -217,11 +235,6 @@ def process_selected_dicom():
     return jsonify({"mensaje": "Ok"})  # Respuesta JSON al frontend
 
 ################################################################################################################
-
-
-@app.route('/')
-def home():
-    return render_template('home.html')
 
 @app.route('/anonimize')
 def anonimize():
@@ -457,7 +470,63 @@ def loadDicom():
         pass
     return render_template('loadDicom.html')
 
+# CODIGO - INICIO DE SESION
+# Formulario de inicio de sesión
+class LoginForm(FlaskForm):
+    username = StringField('Usuario', validators=[InputRequired(), Length(min=4, max=15)])
+    password = PasswordField('Contraseña', validators=[InputRequired(), Length(min=4, max=20)])
+    submit = SubmitField('Iniciar sesión')
 
+# Formulario de registro
+class RegisterForm(FlaskForm):
+    username = StringField('Usuario', validators=[InputRequired(), Length(min=4, max=15)])
+    password = PasswordField('Contraseña', validators=[InputRequired(), Length(min=4, max=20)])
+    confirm_password = PasswordField('Confirmar contraseña', validators=[InputRequired(), EqualTo('password')])
+    submit = SubmitField('Registrarse')
+
+# Base de datos de ejemplo (diccionario en memoria)
+usuarios = {}
+
+@app.route('/')
+def home():
+    return render_template('index.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    form = LoginForm()
+    if form.validate_on_submit():
+        user = form.username.data
+        password = form.password.data
+
+        if user in usuarios and usuarios[user] == password:
+            session['user_logged_in'] = True
+            session['user_initials'] = user[:2].upper()
+            flash('Inicio de sesión exitoso', 'success')
+            return redirect(url_for('home'))
+        else:
+            flash('Usuario o contraseña incorrectos', 'danger')
+    return render_template('login.html', form=form)
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    form = RegisterForm()
+    if form.validate_on_submit():
+        user = form.username.data
+        password = form.password.data
+
+        if user in usuarios:
+            flash('El usuario ya existe', 'danger')
+        else:
+            usuarios[user] = password
+            flash('Registro exitoso. Ahora puedes iniciar sesión.', 'success')
+            return redirect(url_for('login'))
+    return render_template('register.html', form=form)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Has cerrado sesión', 'info')
+    return redirect(url_for('home'))
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)

@@ -1,11 +1,9 @@
-/* === Colores institucionales UdeG con negro y amarillo === */
 :root {
-    --udg-blue: #002060;
-    --udg-red: #B10202;
-    --udg-yellow: #FFD700;
-    --black: #000000;
-    --white: #ffffff;
-    --light-gray: #f8f9fa;
+    --gris-oscuro:  #2b2b2f;
+    --gris-fuerte:  #54555a;
+    --gris-medio:   #8a8b90;
+    --gris-debil:   #b9babf;
+    --gris-claro:   #dfe0e4;
 }
 
 /* Pantalla de carga */
@@ -15,7 +13,7 @@
     left: 0;
     width: 100vw;
     height: 100vh;
-    background-color: black;
+    background-color: var(--gris-oscuro);
     z-index: 9999;
     display: flex;
     flex-direction: column;
@@ -24,9 +22,9 @@
 }
 
 #loader {
-    border: 12px solid #f3f3f3;
-    border-top: 12px solid #FFD700; /* Amarillo UdeG */
-    border-bottom: 12px solid #B10202; /* Rojo institucional */
+    border: 12px solid var(--gris-claro);
+    border-top: 12px solid var(--gris-fuerte); 
+    border-bottom: 12px solid var(--gris-fuerte); 
     border-radius: 50%;
     width: 80px;
     height: 80px;
@@ -44,7 +42,6 @@
     animation: pulse 1.5s infinite ease-in-out;
 }
 
-/* Efecto de "latido" para el logo */
 @keyframes pulse {
     0% { transform: scale(1); opacity: 1; }
     50% { transform: scale(1.1); opacity: 0.8; }
@@ -53,148 +50,176 @@
 
 /* Estilo para la barra de navegación */
 .navbar {
-    background-color: var(--udg-blue); /* Azul UdeG */
-    box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
+    background-color: var(--gris-oscuro);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 .navbar .navbar-brand {
     font-size: 1.5rem;
-    color: var(--udg-blue); /* Azul UdeG */
+    color: var(--gris-debil);
 }
 
 .navbar .navbar-toggler-icon {
-    background-color: var(--udg-blue); /* Azul UdeG */
+    background-color: var(--gris-debil);
 }
 
 .navbar .nav-link {
-    color: var(--white); /* Blanco */
+    color: var(--gris-debil);
     font-weight: bold;
     padding: 12px 15px;
 }
 
 .navbar .nav-link:hover {
-    background-color: var(--udg-red); /* Rojo UdeG */
-    color: var(--udg-blue); /* Azul UdeG */
+    background-color: var(--gris-fuerte);
+    color: var(--gris-claro);
 }
 
 .navbar .nav-item.dropdown:hover .dropdown-menu {
-    background-color: var(--udg-blue); /* Azul UdeG */
+    background-color: var(--gris-fuerte);
 }
 
 .navbar .dropdown-menu {
-    background-color: var(--udg-blue); /* Azul UdeG */
+    background-color: var(--gris-oscuro);
 }
 
 .navbar .dropdown-item {
-    color: var(--white); /* Blanco */
+    color: var(--gris-debil);
 }
 
 .navbar .dropdown-item:hover {
-    background-color: var(--udg-red); /* Rojo UdeG */
-    color: var(--udg-yellow); /* Amarillo UdeG */
+    background-color: var(--gris-fuerte);
+    color: var(--gris-claro);
 }
 
 .navbar .form-control {
-    background-color: var(--white); /* Gris claro para el input */
+    background-color: var(--gris-medio);
     border-radius: 5px;
+    color: var(--gris-claro);
+    border: 1px solid var(--gris-fuerte);
+}
+
+.navbar .form-control:focus {
+    background-color: var(--gris-fuerte);
+    color: var(--gris-claro);
+    outline: none;
 }
 
 .navbar .btn-outline-light {
-    color: var(--udg-yellow); /* Amarillo UdeG */
-    border-color: var(--udg-yellow);
+    color: var(--gris-debil);
+    border-color: var(--gris-oscuro);
 }
 
 .navbar .btn-outline-light:hover {
-    background-color: var(--udg-yellow);
-    color: var(--udg-blue); /* Azul UdeG */
+    background-color: var(--gris-debil);
+    color: var(--gris-medio);
 }
 
-/* Agregar sombra a la barra de navegación */
-.navbar-dark {
-    box-shadow: 0px 3px 10px rgba(0, 0, 0, 0.15);
-}
-
-/* === Estilos generales === */
+/* Estilos generales */
 body {
-    background-image: url("https://i.pinimg.com/736x/52/4c/05/524c059dfdd7b24d13b06fa0a7e74dbb.jpg"); /* Asegúrate de que esté en la carpeta 'static' si usas Flask */
-    background-size: 85%;         /* Ajusta la imagen al tamaño de la pantalla */
-    background-repeat: no-repeat;   /* No la repite */
-    background-position: center 46%;    /* Centra la imagen */
-    background-attachment: fixed;   /* Para que no se mueva al hacer scroll */
-    background-color: black;        /* Color de fondo por si no carga bien la imagen */
-    color: white;                   /* Ajusta el texto si quieres que contraste */
+    background-color: var(--gris-oscuro);
+    color: var(--gris-medio);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 h1, h2, h3, h4, h5 {
-    color: var(--black);
+    color: var(--gris-claro);
     font-weight: bold;
 }
 
 .card {
-    background-color: var(--black);
-    color: var(--white);
-    border: 2px solid var(--udg-yellow);
+    background-color: #38383e;  /* Un poco más claro que el fondo */
+    color: var(--gris-debil);
+    border: 1px solid var(--gris-fuerte);
+    border-radius: 12px;
+    box-shadow: 0 0 12px rgba(0,0,0,0.4);
 }
 
 .table {
-    background-color: rgba(255, 255, 255, 0.9);
-    color: var(--udg-blue);
-    border: 2px solid var(--black);
+    background-color: transparent;
+    color: var(--gris-debil);
+    border-collapse: separate;
+    border-spacing: 0 6px;
 }
 
 .table th {
-    background-color: var(--udg-blue);
-    color: var(--white);
-    font-weight: bold;
+    background-color: var(--gris-fuerte);
+    color: var(--gris-claro);
+    font-weight: 600;
+    border-bottom: 1px solid var(--gris-medio);
+    padding: 12px 15px;
 }
 
 .table td {
-    color: var(--udg-blue);
-}
-
-.btn-udg-red {
-    background-color: var(--udg-red);
-    color: var(--white);
+    background-color: #44444d;
+    border-radius: 6px;
+    color: var(--gris-claro);
     border: none;
-    border-radius: 5px;
-    padding: 10px 20px;
-    transition: background-color 0.3s ease, transform 0.2s ease;
+    padding: 12px 15px;
 }
 
-.btn-udg-red:hover {
-    background-color: #8c0101;
-    transform: scale(1.03);
+input.form-control {
+    background-color: #4a4a50;
+    color: var(--gris-claro);
+    border: 1px solid var(--gris-fuerte);
+    border-radius: 6px;
+    transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
-.btn-udg-yellow {
-    background-color: var(--udg-yellow);
-    color: var(--black);
-    font-weight: bold;
+input.form-control:focus {
+    background-color: var(--gris-fuerte);
+    color: var(--gris-claro);
+    border-color: var(--gris-claro);
+    outline: none;
+}
+
+.btn {
+    border-radius: 8px;
+    padding: 0.5rem 1.2rem;
+    font-weight: 500;
     border: none;
-    border-radius: 5px;
-    padding: 10px 20px;
-    transition: background-color 0.3s ease, transform 0.2s ease;
+    transition: background-color 0.3s ease;
+    cursor: pointer;
 }
 
-.btn-udg-yellow:hover {
-    background-color: #e6c200;
-    transform: scale(1.03);
+.btn-danger {
+    background-color: var(--gris-fuerte);
+    color: var(--gris-claro);
 }
 
-.bg-udg-dark {
-    background-color: var(--black);
-    color: var(--white);
+.btn-danger:hover {
+    background-color: var(--gris-medio);
+    color: var(--gris-oscuro);
 }
 
-.bg-udg-blue {
-    background-color: var(--udg-blue);
-    color: var(--white);
+.btn-secondary {
+    background-color: #4a4a50;
+    color: var(--gris-claro);
 }
 
-.border-udg-yellow {
-    border: 2px solid var(--udg-yellow);
+.btn-secondary:hover {
+    background-color: var(--gris-fuerte);
+    color: var(--gris-claro);
+}
+
+.btn-success {
+    background-color: var(--gris-debil);
+    color: var(--gris-oscuro);
+}
+
+.btn-success:hover {
+    background-color: var(--gris-medio);
+    color: var(--gris-oscuro);
 }
 
 .shadow-udg {
-    box-shadow: 0 0 10px rgba(255, 215, 0, 0.4);
+    box-shadow: 0 0 10px rgba(92, 91, 87, 0.4);
+}
+
+.btn.rounded-circle {
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .hidden {
+    display: none !important;
 }

@@ -32,7 +32,7 @@
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow">
         <div class="container-fluid">
             <a class="navbar-brand fw-bold text-light d-flex align-items-center" href="{{ url_for('home') }}">
-                <img src="{{ url_for('static', filename='img/udg_logo.png') }}" alt="UdeG Logo" style="height: 40px; margin-right: 10px;">
+                <!--<img src="{{ url_for('static', filename='img/udg_logo.png') }}" alt="UdeG Logo" style="height: 40px; margin-right: 10px;"> -->
                 UdeG
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
@@ -79,9 +79,53 @@
                     <input class="form-control me-2 border-0 shadow-sm bg-light" type="search" placeholder="Buscar..." aria-label="Search">
                     <button class="btn btn-outline-light" type="submit"><i class="bi bi-search"></i></button>
                 </form>
+                <div class="d-flex align-items-center ms-3">
+                    {% if user_logged_in %}
+                    <!-- Usuario logueado: círculo verde con iniciales -->
+                    <div class="dropdown">
+                        <button class="btn btn-success rounded-circle d-flex justify-content-center align-items-center"
+                                id="userMenuButton" type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                                style="width: 40px; height: 40px; font-weight: bold; color: white; user-select: none;">
+                        {{ user_initials }}
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userMenuButton">
+                        <li><a class="dropdown-item" href="/profile">Perfil</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="/logout">Cerrar sesión</a></li>
+                        </ul>
+                    </div>
+                    {% else %}
+                    <!-- Usuario no logueado: círculo gris con icono de usuario -->
+                    <div class="dropdown">
+                        <button class="btn btn-secondary rounded-circle d-flex justify-content-center align-items-center"
+                                id="loginMenuButton" type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                                style="width: 40px; height: 40px; color: white;">
+                        <i class="bi bi-person-fill"></i>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="loginMenuButton">
+                        <li><a class="dropdown-item" href="/login">Iniciar sesión</a></li>
+                        <li><a class="dropdown-item" href="/register">Registrarse</a></li>
+                        </ul>
+                    </div>
+                    {% endif %}
+                </div>
+  
             </div>
         </div>
     </nav>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div class="container mt-3">
+        {% for category, message in messages %}
+            <div class="alert alert-{{ 'danger' if category=='danger' else category }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+        </div>
+    {% endif %}
+    {% endwith %}
+
 
     <!-- Contenido principal -->
     <div class="container mt-4 text-center">
