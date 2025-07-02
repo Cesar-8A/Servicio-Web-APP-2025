@@ -9,6 +9,7 @@ import tempfile
 import zipfile
 from collections import defaultdict
 import numpy as np
+import numpy.ma as ma
 import pyvista as pv
 pv.OFF_SCREEN = True
 import panel as pn
@@ -131,21 +132,20 @@ def create_render():
 
 
 def add_RT_to_plotter():
-    
     global plotter, panel_vtk, mask_actor
 
     if plotter is None:
         print("No hay plotter activo.")
         return
 
-    app.config['RT'] = np.flip(app.config['RT'], axis=(0, 2)) # Voltear las posiciones 1 y 3 para que el 3D quede alineado
-    RT_Image = app.config['RT']
-    RT_Image = RT_Image.transpose(2, 0, 1) # Formato NRRD: (X, Y, Z), cambiar para coincidir con DICOM
+    RT_Image = np.flip(app.config['RT'], axis=(0, 1, 2)) # Voltear las posiciones 1 y 3 para que el 3D quede alineado
+    RT_Image = RT_Image.transpose(2, 0, 1) # Formato NRRD: (X, Y, Z), cambiar para coincidir con DICOM 
+    RT_2D = np.flip(app.config['RT'], axis=(2))
+    app.config['RT_aligned'] = RT_2D
 
+    # Asignar los mismos origin y spacing del grid de DICOM para estar en el mismo espacio físico
     rt_grid = pv.ImageData()
     rt_grid.dimensions = np.array(RT_Image.shape) + 1
-    
-    # Asignar los mismos origin y spacing del grid de DICOM para estar en el mismo espacio físico
     rt_grid.origin = grid_dicom.origin
     rt_grid.spacing = grid_dicom.spacing
     
@@ -416,28 +416,43 @@ def get_image(view, layer):
     slice_thickness = app.config['dicom_series'][unique_id]["SliceThickness"]
     pixel_spacing = app.config['dicom_series'][unique_id]["PixelSpacing"]
 
+    # Guardar la segmentación en rt, si no está no se ejecuta
+    rt = app.config.get('RT_aligned')
+    show_seg = rt is not None
+
     if view == 'axial':
         slice_img = image[layer, :, :]
+        seg_slice = np.flip(rt[:, :, layer], axis=0) if show_seg else None
+        aspect_ratio = pixel_spacing[1] / pixel_spacing[0]
     elif view == 'sagital':
         slice_img = image[:, layer, :]
+        seg_slice = np.flip(rt[:, layer, :], axis=0) if show_seg else None
+        aspect_ratio = slice_thickness / pixel_spacing[0]
     elif view == 'coronal':
+        seg_slice = np.flip(rt[layer, :, :], axis=0) if show_seg else None
         slice_img = image[:, :, layer]
+        aspect_ratio = slice_thickness / pixel_spacing[1]
     else:
         return "Vista no válida", 400
 
-    # Ajuste del espaciado a proporciones reales
-    if view == 'axial':
-        aspect_ratio = pixel_spacing[1] / pixel_spacing[0]
-    elif view == 'sagital':
-        aspect_ratio = slice_thickness / pixel_spacing[0]
-    elif view == 'coronal':
-        aspect_ratio = slice_thickness / pixel_spacing[1]
+    if show_seg:
+        slice_img = np.flip(slice_img, axis=0)
 
     # Ajustar y mostrar la imagen
     plt.figure(figsize=(6, 6))
     plt.imshow(slice_img, cmap='gray', aspect=aspect_ratio)
     plt.axis('off')
 
+    # Mostrar la segmentación
+    if show_seg:
+        # Voltear la máscara
+        flipped_seg = np.flip((seg_slice > 1).T)
+        # Enmascarar ceros: solo dibujar donde hay segmentación
+        masked_seg = ma.masked_where(flipped_seg == 0, flipped_seg)
+        # Overlay solo la segmentación
+        plt.imshow(masked_seg, cmap='Reds', alpha=0.8, aspect=aspect_ratio, origin='lower',
+                   vmin=0, vmax=1)
+        
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
     plt.close()
