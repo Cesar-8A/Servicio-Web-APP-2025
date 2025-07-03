@@ -5,20 +5,28 @@
       {% if success == 0 %}
           <h1 class="text-light">Carga primero una imagen</h1>
       {% else %}
-          <div class="card bg-dark text-light shadow-lg p-4 border-0 rounded-3">
-              <h1 class="mb-3">Visualización DICOM</h1>
-              <p class="lead">Renderizado de la imagen cargada.</p>
+          <div class="card table-container-card text-light shadow-lg p-4">
+              <h1 class="mb-3 text-udg-rojo">Visualización DICOM</h1>
+              <p class="lead text-light">Renderizado de la imagen cargada.</p>
   
-              <!-- Subir RT Struct (NRRD) -->
-              <div class="mt-4">
-                  <h2 class="text-light">Subir RT Struct (NRRD)</h2>
-                  <form action="/upload_RT" method="post" enctype="multipart/form-data" class="mt-3">
-                      <div class="input-group w-50 mx-auto">
-                          <input type="file" name="file" accept=".nrrd" class="form-control bg-secondary text-light border-0 shadow-sm">
-                          <button type="submit" class="btn btn-success"><i class="bi bi-upload"></i> Subir</button>
-                      </div>
-                  </form>
-              </div>
+              <!-- Subir RT Struct (NRRD) con estilo UDG -->
+                <div class="card shadow-lg p-4 border-2 rounded-3 mt-5" style="background-color: var(--gris-oscuro); border-color: var(--gris-fuerte);">
+                    <h1 style="color: var(--gris-claro);">Subir RT Struct (NRRD)</h1>
+                    <form action="/upload_RT" method="post" enctype="multipart/form-data" class="mt-3">
+                        <div class="input-group justify-content-center">
+                            <input type="file" name="file" accept=".nrrd"
+                                class="form-control"
+                                id="inputGroupFileNRRD"
+                                aria-describedby="inputGroupFileAddonNRRD"
+                                aria-label="Upload">
+                            <button class="btn-secondary" type="submit" id="inputGroupFileAddonNRRD">
+                                <i class="bi bi-upload"></i> Subir archivo NRRD
+                            </button>
+                        </div>
+                        <div id="archivoNRRDSeleccionado" class="form-text mt-2 text-warning-emphasis text-center"></div>
+                    </form>
+                </div>
+
           </div>
   
           <!-- Grid de 4 vistas -->
@@ -26,7 +34,7 @@
             <div class="row g-4">
                 <!-- Vista Axial (superior izquierda) -->
                 <div class="col-md-6">
-                    <div class="card bg-dark text-light border-0 shadow">
+                    <div class="card table-container-card text-light borde-udg">
                         <div class="card-body">
                             <h5 class="card-title">Vista Axial</h5>
                             <input type="range" id="slider_axial" min="0" max="{{ max_value_axial }}" value="{{max_value_axial//2}}">
@@ -38,7 +46,7 @@
 
                 <!-- Vista 3D (superior derecha) -->
                 <div class="col-md-6">
-                    <div class="card bg-dark text-light border-0 shadow">
+                    <div class="card table-container-card text-light borde-udg">
                         <div class="card-body">
                             <h5 class="card-title">Vista 3D</h5>
                             <iframe src="http://127.0.0.1:5010/panel" id="DicomRender" width="100%" height="400" class="border-0 rounded-3"></iframe>
@@ -48,7 +56,7 @@
 
                 <!-- Vista Sagital (inferior izquierda) -->
                 <div class="col-md-6">
-                    <div class="card bg-dark text-light border-0 shadow">
+                    <div class="card table-container-card text-light borde-udg">
                         <div class="card-body">
                             <h5 class="card-title">Vista Sagital</h5>
                             <input type="range" id="slider_sagital" min="0" max="{{ max_value_sagital }}" value="{{max_value_sagital//2}}">
@@ -60,7 +68,7 @@
 
                 <!-- Vista Coronal (inferior derecha) -->
                 <div class="col-md-6">
-                    <div class="card bg-dark text-light border-0 shadow">
+                    <div class="card table-container-card text-light borde-udg">
                         <div class="card-body">
                             <h5 class="card-title">Vista Coronal</h5>
                             <input type="range" id="slider_coronal" min="0" max="{{ max_value_coronal }}" value="{{max_value_coronal//2}}">

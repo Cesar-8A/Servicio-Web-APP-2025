@@ -1,4 +1,6 @@
 :root {
+    --rojo-UDG:     #AE1C28;
+    --amarillo-UDG: #FFD700;
     --gris-oscuro:  #2b2b2f;
     --gris-fuerte:  #54555a;
     --gris-medio:   #8a8b90;
@@ -22,9 +24,9 @@
 }
 
 #loader {
-    border: 12px solid var(--gris-claro);
-    border-top: 12px solid var(--gris-fuerte); 
-    border-bottom: 12px solid var(--gris-fuerte); 
+    border: 12px solid var(--amarillo-UDG);
+    border-top: 12px solid var(--rojo-UDG); 
+    border-bottom: 12px solid var(--rojo-UDG); 
     border-radius: 50%;
     width: 80px;
     height: 80px;
@@ -56,7 +58,7 @@
 
 .navbar .navbar-brand {
     font-size: 1.5rem;
-    color: var(--gris-debil);
+    color: var(--amarillo-UDG);
 }
 
 .navbar .navbar-toggler-icon {
@@ -70,8 +72,8 @@
 }
 
 .navbar .nav-link:hover {
-    background-color: var(--gris-fuerte);
-    color: var(--gris-claro);
+    background-color: var(--rojo-UDG);
+    color: var(--amarillo-UDG);
 }
 
 .navbar .nav-item.dropdown:hover .dropdown-menu {
@@ -87,8 +89,8 @@
 }
 
 .navbar .dropdown-item:hover {
-    background-color: var(--gris-fuerte);
-    color: var(--gris-claro);
+    background-color: var(--amarillo-UDG);
+    color: var(--gris-oscuro);
 }
 
 .navbar .form-control {
@@ -110,8 +112,8 @@
 }
 
 .navbar .btn-outline-light:hover {
-    background-color: var(--gris-debil);
-    color: var(--gris-medio);
+    background-color: var(--amarillo-UDG);
+    color: black;
 }
 
 /* Estilos generales */
@@ -127,13 +129,19 @@ h1, h2, h3, h4, h5 {
 }
 
 .card {
-    background-color: #38383e;  /* Un poco más claro que el fondo */
-    color: var(--gris-debil);
+    background-color: #38383e;
+    color: var(--amarillo-UDG);
     border: 1px solid var(--gris-fuerte);
     border-radius: 12px;
     box-shadow: 0 0 12px rgba(0,0,0,0.4);
 }
 
+/* borde de acento en tarjetas importantes */
+.borde-udg {
+    padding-left: 15px;
+}
+
+/* Tablas */
 .table {
     background-color: transparent;
     color: var(--gris-debil);
@@ -157,21 +165,7 @@ h1, h2, h3, h4, h5 {
     padding: 12px 15px;
 }
 
-input.form-control {
-    background-color: #4a4a50;
-    color: var(--gris-claro);
-    border: 1px solid var(--gris-fuerte);
-    border-radius: 6px;
-    transition: background-color 0.3s ease, border-color 0.3s ease;
-}
-
-input.form-control:focus {
-    background-color: var(--gris-fuerte);
-    color: var(--gris-claro);
-    border-color: var(--gris-claro);
-    outline: none;
-}
-
+/* Botones base */
 .btn {
     border-radius: 8px;
     padding: 0.5rem 1.2rem;
@@ -181,11 +175,28 @@ input.form-control:focus {
     cursor: pointer;
 }
 
+/* Botones con estilo UDG */
+.btn-udg-rojo {
+    background-color: var(--rojo-UDG);
+    color: white;
+}
+.btn-udg-rojo:hover {
+    background-color: #89171e;
+}
+
+.btn-udg-dorado {
+    background-color: var(--amarillo-UDG);
+    color: black;
+}
+.btn-udg-dorado:hover {
+    background-color: #e0c300;
+}
+
+/* Botones existentes */
 .btn-danger {
     background-color: var(--gris-fuerte);
     color: var(--gris-claro);
 }
-
 .btn-danger:hover {
     background-color: var(--gris-medio);
     color: var(--gris-oscuro);
@@ -194,18 +205,30 @@ input.form-control:focus {
 .btn-secondary {
     background-color: #4a4a50;
     color: var(--gris-claro);
+    border: 2px solid var(--gris-fuerte);
+    border-radius: 8px;
+    padding: 0.5rem 1.2rem;
+    font-weight: 500;
+    border: none;
+    transition: background-color 0.3s ease;
+    cursor: pointer;
 }
-
 .btn-secondary:hover {
     background-color: var(--gris-fuerte);
-    color: var(--gris-claro);
+    color: var(--amarillo-UDG);
+    border: 2px solid var(--gris-fuerte);
+    border-radius: 8px;
+    padding: 0.5rem 1.2rem;
+    font-weight: 500;
+    border: none;
+    transition: background-color 0.3s ease;
+    cursor: pointer;
 }
 
 .btn-success {
     background-color: var(--gris-debil);
     color: var(--gris-oscuro);
 }
-
 .btn-success:hover {
     background-color: var(--gris-medio);
     color: var(--gris-oscuro);
@@ -218,8 +241,283 @@ input.form-control:focus {
 .btn.rounded-circle {
     box-shadow: none !important;
     border: none !important;
-  }
+}
 
-  .hidden {
+.hidden {
     display: none !important;
+}
+
+/* Estilo para el input de archivos */
+input[type="file"].form-control {
+    background-color: #3e3e44;
+    color: var(--gris-claro);
+    border: 2px solid var(--rojo-UDG);
+    border-right: none;
+    border-radius: 8px 0 0 8px;
+    padding: 0.6rem 1rem;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+input[type="file"].form-control:hover {
+    border-color: var(--amarillo-UDG);
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+}
+
+input[type="file"].form-control::file-selector-button {
+    background-color: var(--rojo-UDG);
+    color: black;
+    padding: 0.4rem 0.8rem;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+input[type="file"].form-control::file-selector-button:hover {
+    background-color: var(--amarillo-UDG);
+    color: black;
+}
+
+/* Estilo para el botón de subir */
+button#inputGroupFileAddon04 {
+    background-color: var(--amarillo-UDG);
+    color: #222;
+    border: 2px solid var(--amarillo-UDG);
+    border-radius: 0 8px 8px 0;
+    padding: 0.6rem 1.2rem;
+    font-weight: 600;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+button#inputGroupFileAddon04:hover {
+    background-color: var(--rojo-UDG);
+    color: white;
+    border-color: var(--rojo-UDG);
+}
+
+/* Estilo del input de archivos */
+input[type="file"].form-control {
+    background-color: var(--gris-fuerte);
+    color: var(--gris-claro);
+    border: 2px solid var(--rojo-UDG);
+    border-radius: 6px;
+    padding: 8px;
+    transition: all 0.3s ease;
+}
+
+input[type="file"].form-control:hover {
+    border-color: var(--amarillo-UDG);
+    background-color: #3a3a3f;
+    cursor: pointer;
+}
+
+input[type="file"]::file-selector-button {
+    background-color: var(--rojo-UDG);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    margin-right: 12px;
+    border-radius: 4px;
+    transition: background-color 0.3s ease;
+}
+
+input[type="file"]::file-selector-button:hover {
+    background-color: #8c121f;
+}
+
+/* Estilo del texto que aparece abajo del input */
+#archivoSeleccionado {
+    color: var(--amarillo-UDG);
+    font-weight: 500;
+    margin-top: 10px;
+}
+
+/* === Sección de Resultados DICOM con diseño UDG refinado === */
+.table-container-card {
+    background-color: var(--gris-oscuro);
+    border-radius: 12px;
+    padding: 2rem;
+    box-shadow: 0 4px 20px rgba(174, 28, 40, 0.15);
+    transition: box-shadow 0.3s ease;
+}
+
+.table-container-card:hover {
+    box-shadow: 0 6px 24px rgba(255, 215, 0, 0.15);
+}
+
+.table-container-card h1 {
+    color: var(--amarillo-UDG);
+    font-weight: 700;
+    font-size: 1.75rem;
+    margin-bottom: 1.5rem;
+}
+
+/* Tabla con estilo UDG sobrio */
+.table.udg-style {
+    background-color: var(--gris-claro);
+    color: var(--gris-fuerte);
+    border: 2px solid var(--gris-oscuro);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.table.udg-style thead {
+    background-color: var(--gris-fuerte);
+    color: var(--gris-claro);
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.table.udg-style thead th {
+    padding: 0.75rem 1.2rem;
+    border-bottom: 2px solid var(--gris-medio);
+}
+
+.table.udg-style tbody td {
+    color: var(--gris-oscuro);
+    background-color: var(--gris-debil);
+    padding: 0.7rem 1rem;
+    transition: background-color 0.3s ease;
+}
+
+.table.udg-style tbody tr:hover {
+    background-color: var(--amarillo-UDG);
+    color: var(--gris-oscuro);
+    font-weight: 500;
+    cursor: pointer;
+}
+
+/* Texto que indica la selección */
+#selectedText {
+    font-weight: 600;
+    color: var(--rojo-UDG);
+    margin-top: 1rem;
+    font-size: 1.1rem;
+}
+
+/* Botón Aceptar personalizado */
+#acceptButton {
+    background-color: var(--rojo-UDG);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 0.6rem 1.4rem;
+    font-weight: 500;
+    box-shadow: 0 2px 6px rgba(174, 28, 40, 0.3);
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+#acceptButton:hover {
+    background-color: #89171e;
+    box-shadow: 0 4px 10px rgba(174, 28, 40, 0.4);
+}
+
+/* === Estilo para tabla de anonimización con diseño UDG === */
+#tabla-container {
+    background-color: var(--gris-oscuro);
+    border-radius: 12px;
+    padding: 2rem;
+    box-shadow: 0 4px 20px rgba(174, 28, 40, 0.15);
+    margin-bottom: 2rem;
+}
+
+#tabla-container table {
+    border-collapse: collapse;
+    width: 100%;
+    color: var(--gris-claro);
+    border: 2px solid var(--gris-medio);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+#tabla-container thead {
+    background-color: var(--gris-fuerte);
+    color: var(--gris-claro);
+    text-transform: uppercase;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+
+#tabla-container th,
+#tabla-container td {
+    padding: 0.75rem 1rem;
+    text-align: center;
+    border: 1px solid var(--gris-debil);
+}
+
+#tabla-container tbody tr:hover {
+    background-color: var(--amarillo-UDG);
+    color: var(--gris-oscuro);
+    transition: background-color 0.3s ease;
+}
+
+/* Estilo para filas cabecera de grupo */
+#tabla-container tr[id^="header_"] {
+    background-color: #f8f8f8;
+    color: var(--rojo-UDG);
+    font-weight: bold;
+    font-size: 1.1rem;
+}
+
+/* Input de edición */
+#tabla-container input[type="text"] {
+    background-color: var(--gris-fuerte);
+    color: var(--gris-claro);
+    border: 1px solid var(--rojo-UDG);
+    border-radius: 6px;
+    padding: 0.4rem 0.8rem;
+    transition: all 0.3s ease;
+}
+
+#tabla-container input[type="text"]:focus {
+    border-color: var(--amarillo-UDG);
+    outline: none;
+}
+
+/* Contenedor de botones */
+#botones-container {
+    text-align: center;
+    margin-top: 1.5rem;
+}
+
+#botones-container .btn-custom {
+    padding: 0.6rem 1.5rem;
+    font-weight: 500;
+    border-radius: 6px;
+    margin: 0 0.5rem;
+}
+
+/* Botón guardar estilo UDG */
+#botones-container .btn-secondary {
+    background-color: var(--gris-fuerte);
+    border: 2px solid var(--gris-medio);
+    color: var(--amarillo-UDG);
+}
+
+#botones-container .btn-secondary:hover {
+    background-color: var(--gris-debil);
+    color: var(--gris-oscuro);
+    border-color: var(--gris-oscuro);
+}
+
+/* Botón exportar estilo UDG */
+#botones-container .btn-success {
+    background-color: var(--rojo-UDG);
+    color: var(--gris-oscuro);
+    border: 2px solid var(--rojo-UDG);
+}
+
+#botones-container .btn-success:hover {
+    background-color: #89171e;
+    color: white;
+    border-color: var(--gris-oscuro);
+}
+
+/* Mensaje sin atributos */
+#mensaje-todos-excluidos h3 {
+    color: var(--rojo-UDG);
+    font-weight: 600;
+    margin-top: 2rem;
 }
