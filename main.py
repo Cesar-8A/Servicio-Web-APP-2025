@@ -1,24 +1,43 @@
 from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, Response
+from flask import session, flash
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_wtf import FlaskForm
+from wtforms import StringField, PasswordField, SubmitField
+from wtforms.validators import InputRequired, Length, EqualTo
+
 import tempfile
 import zipfile
 from collections import defaultdict
 import numpy as np
 import pyvista as pv
+pv.OFF_SCREEN = True
 import panel as pn
 import os
 import pydicom
 import nrrd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import io
+from scipy.ndimage import label, binary_erosion
 
 import dash
 from dash import html, dcc, Input, Output, State
 import dash_vtk
 from dash_extensions.enrich import DashProxy, MultiplexerTransform
 
-os.chdir("C:/Users/Alber/OneDrive/Escritorio/flask test/v2")
+os.chdir("c:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
 
 app = Flask(__name__)
+app.secret_key = "clave_secreta_no_tan_secreta_jeje"
+
+# Inyección global de estado de sesión a todas las plantillas
+@app.context_processor
+def inject_user():
+    return {
+        'user_logged_in': session.get('user_logged_in', False),
+        'user_initials': session.get('user_initials', '')
+    }
 
 #Variables globales
 panel_vtk = None
@@ -42,50 +61,109 @@ app.config["unique_id"] = 0
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
+if not os.path.exists(UPLOAD_FOLDER_NRRD):
+    os.makedirs(UPLOAD_FOLDER_NRRD)    
+
 pn.extension('vtk')  # Activar la extensión VTK de Panel
 
 
 def create_render():
-    global plotter
-    global grid_dicom
-    volume = ((app.config['Image'] < 200)*1).astype(np.int16) # Asegúrate de que 'Image' es un array NumPy 3D
-
-    unique_id = app.config["unique_id"]
-    # Crear el volumen a partir de los datos de la imagen
-    grid = pv.ImageData()
-
-    grid.dimensions = np.array(volume.shape) + 1
-
-    grid.origin = app.config['dicom_series'][unique_id]["ImagePositionPatient"]  # The bottom left corner of the data set
-    grid.spacing = (app.config['dicom_series'][unique_id]["SliceThickness"], app.config['dicom_series'][unique_id]["PixelSpacing"][0], app.config['dicom_series'][unique_id]["PixelSpacing"][1])  # These are the cell sizes along each axis
-    #print(app.config['dicom_series'][unique_id]["PixelSpacing"])
-    #print(app.config['dicom_series'][unique_id]["SliceThickness"])
-
-
-    grid.cell_data["values"] = volume.flatten(order="F")
-    # Crear la visualización
-    plotter = pv.Plotter()
-    plotter.add_volume(grid, cmap=['green', 'red', 'blue'] ,ambient = 0.5, shade=True, show_scalar_bar = True, opacity="sigmoid_2", )
-    grid_dicom = grid
-    # Usar Panel para mostrar el gráfico de PyVista
-    panel_vtk = pn.pane.VTK(plotter.ren_win,  width=400, height=500)
     
-    return panel_vtk
+    global plotter, skin_actor, slider, grid_dicom
+
+    volume_bone = ((app.config['Image'] > 175) * 1).astype(np.int16)
+    volume_skin = (((app.config['Image'] > -200) & (app.config['Image'] < 0)) * 1).astype(np.int16)
+    unique_id = app.config["unique_id"]
+
+    origin = app.config['dicom_series'][unique_id]["ImagePositionPatient"]
+    spacing = (
+        app.config['dicom_series'][unique_id]["SliceThickness"],
+        app.config['dicom_series'][unique_id]["PixelSpacing"][0],
+        app.config['dicom_series'][unique_id]["PixelSpacing"][1],
+    )
+
+    # --- HUESO GRID ---
+    grid_bone = pv.ImageData()
+    grid_bone.dimensions = np.array(volume_bone.shape) + 1
+    grid_bone.origin = origin
+    grid_bone.spacing = spacing
+    grid_bone.cell_data["values"] = volume_bone.flatten(order="F")
+    grid_bone = grid_bone.cell_data_to_point_data()
+    surface_bone = grid_bone.contour([0.5])
+
+    # --- PIEL GRID ---
+    grid_skin = pv.ImageData()
+    grid_skin.dimensions = np.array(volume_skin.shape) + 1
+    grid_skin.origin = origin
+    grid_skin.spacing = spacing
+    grid_skin.cell_data["values"] = volume_skin.flatten(order="F")
+    grid_skin = grid_skin.cell_data_to_point_data()
+    surface_skin = grid_skin.contour([0.5])
+    
+    # Para usarse después y plotear segmentaciones
+    grid_dicom = grid_skin
+    
+    # --- PLOTTING ---
+    plotter = pv.Plotter(off_screen=True)
+    plotter.set_background("black")
+    plotter.add_mesh(surface_bone, color="white", smooth_shading=True, ambient=0.3, specular=0.4, specular_power=10)
+    skin_actor = plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, name="skin", smooth_shading=True)  # Piel transparente
+
+    plotter.view_isometric()
+    plotter.show_axes()
+
+    panel_vtk = pn.pane.VTK(plotter.ren_win, width=400, height=500)
+
+    # --- SLIDER + CALLBACK ---
+    slider = pn.widgets.FloatSlider(name="Opacidad de la piel", start=0.0, end=1.0, step=0.05, value=0.5)
+
+    def update_opacity(event):  # Actualizar la opacidad de la piel
+        skin_actor.GetProperty().SetOpacity(event.new)
+        panel_vtk.param.trigger('object')
+
+    slider.param.watch(update_opacity, 'value')
+
+    return pn.Column(panel_vtk, slider)
 
 
 def add_RT_to_plotter():
-    global plotter
-    global grid
-    RT_Image = app.config['RT']
-    # Crear el volumen a partir de los datos de la imagen
-    grid = pv.ImageData()
-    print(RT_Image.shape)
-    grid.dimensions = np.array(RT_Image.shape) + 1
+    
+    global plotter, panel_vtk, mask_actor
 
-    grid.cell_data["values"] = RT_Image.flatten(order="F")    
-    plotter.add_volume(grid, cmap=['green', 'red', 'blue'] ,ambient = 0.5, shade=True, show_scalar_bar = True, opacity="sigmoid_2", )
-    plotter.render()
-    panel_vtk.object = plotter.ren_win 
+    if plotter is None:
+        print("No hay plotter activo.")
+        return
+
+    app.config['RT'] = np.flip(app.config['RT'], axis=(0, 2)) # Voltear las posiciones 1 y 3 para que el 3D quede alineado
+    RT_Image = app.config['RT']
+    RT_Image = RT_Image.transpose(2, 0, 1) # Formato NRRD: (X, Y, Z), cambiar para coincidir con DICOM
+
+    rt_grid = pv.ImageData()
+    rt_grid.dimensions = np.array(RT_Image.shape) + 1
+    
+    # Asignar los mismos origin y spacing del grid de DICOM para estar en el mismo espacio físico
+    rt_grid.origin = grid_dicom.origin
+    rt_grid.spacing = grid_dicom.spacing
+    
+    # Asignar segmentación binaria
+    rt_grid.cell_data["values"] = (RT_Image > 1).astype(np.uint8).flatten(order="F")
+
+    # Convertir a point_data para que funcione contour() y Generar superficie con isovalor 0.5
+    rt_grid = rt_grid.cell_data_to_point_data()
+    surface = rt_grid.contour([0.5])
+
+    # Agregar la malla segmentada al plotter
+    plotter.add_mesh(surface, color="red", opacity=0.5, smooth_shading=True, specular=0.3)
+    plotter.render() # Actualizar el plotter
+    panel_vtk.object = plotter.ren_win # Actualizar el panel
+
+    def update_opacity(event):  # Actualizar la opacidad de la piel
+        skin_actor.GetProperty().SetOpacity(event.new)
+        panel_vtk.param.trigger('object')
+
+    slider.param.watch(update_opacity, 'value')
+    
+    return pn.Column(panel_vtk, slider)
 
 
 # Iniciar el servidor Bokeh una sola vez al iniciar la aplicación
@@ -216,11 +294,6 @@ def process_selected_dicom():
     return jsonify({"mensaje": "Ok"})  # Respuesta JSON al frontend
 
 ################################################################################################################
-
-
-@app.route('/')
-def home():
-    return render_template('home.html')
 
 @app.route('/anonimize')
 def anonimize():
@@ -361,6 +434,8 @@ def allowed_file(filename):
 
 @app.route("/upload_RT", methods=["POST"])
 def upload_RT():
+    global panel_vtk, plotter
+
     if 'file' not in request.files:
         return "No se encontró el archivo", 400  # Respuesta de error
 
@@ -369,20 +444,17 @@ def upload_RT():
     if file.filename == '':
         return "Nombre de archivo inválido", 400
 
-    # Guardar el archivo en la carpeta de uploads
-    filepath = os.path.join("uploaded_RT", file.filename)
+    # Guardar el archivo dentro de la ruta segura
+    filepath = os.path.join(UPLOAD_FOLDER_NRRD, file.filename)
     file.save(filepath)
-    app.config['RT'], _ = nrrd.read(filepath)
-    add_RT_to_plotter()
+
     # Leer el archivo NRRD
-    #try:
-    #    app.config['RT'] = nrrd.read(filepath)
-    #    #return jsonify({"message": f"Archivo {file.filename} subido y leído correctamente!"}), 200
-    #    return Response(status=200) 
-    #except Exception as e:
-    #    #return jsonify({"error": f"Error al leer el archivo NRRD: {str(e)}"}), 500
-    #    return Response(status=500)
-    return render_template("render.html", success=(lambda: 0 if type(panel_vtk)==None else 1), render=render) 
+    app.config['RT'], _ = nrrd.read(filepath)
+    
+    # Llamar a la función y actualizar el panel
+    panel_vtk = add_RT_to_plotter()
+
+    return render_template("render.html", max_value_axial=app.config['Image'].shape[0]-1 , max_value_sagital=app.config['Image'].shape[1]-1 , max_value_coronal=app.config['Image'].shape[2]-1)  # Tamaño fijo o dinámico 
         
 
 @app.route('/loadDicomMetadata/<unique_id>')
@@ -456,7 +528,63 @@ def loadDicom():
         pass
     return render_template('loadDicom.html')
 
+# CODIGO - INICIO DE SESION
+# Formulario de inicio de sesión
+class LoginForm(FlaskForm):
+    username = StringField('Usuario', validators=[InputRequired(), Length(min=4, max=15)])
+    password = PasswordField('Contraseña', validators=[InputRequired(), Length(min=4, max=20)])
+    submit = SubmitField('Iniciar sesión')
 
+# Formulario de registro
+class RegisterForm(FlaskForm):
+    username = StringField('Usuario', validators=[InputRequired(), Length(min=4, max=15)])
+    password = PasswordField('Contraseña', validators=[InputRequired(), Length(min=4, max=20)])
+    confirm_password = PasswordField('Confirmar contraseña', validators=[InputRequired(), EqualTo('password')])
+    submit = SubmitField('Registrarse')
+
+# Base de datos de ejemplo (diccionario en memoria)
+usuarios = {}
+
+@app.route('/')
+def home():
+    return render_template('index.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    form = LoginForm()
+    if form.validate_on_submit():
+        user = form.username.data
+        password = form.password.data
+
+        if user in usuarios and usuarios[user] == password:
+            session['user_logged_in'] = True
+            session['user_initials'] = user[:2].upper()
+            flash('Inicio de sesión exitoso', 'success')
+            return redirect(url_for('home'))
+        else:
+            flash('Usuario o contraseña incorrectos', 'danger')
+    return render_template('login.html', form=form)
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    form = RegisterForm()
+    if form.validate_on_submit():
+        user = form.username.data
+        password = form.password.data
+
+        if user in usuarios:
+            flash('El usuario ya existe', 'danger')
+        else:
+            usuarios[user] = password
+            flash('Registro exitoso. Ahora puedes iniciar sesión.', 'success')
+            return redirect(url_for('login'))
+    return render_template('register.html', form=form)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Has cerrado sesión', 'info')
+    return redirect(url_for('home'))
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)

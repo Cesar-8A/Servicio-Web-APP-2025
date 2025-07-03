@@ -2,12 +2,12 @@
 
 {% block content %}
     <div class="container mt-4 text-center">
-        <div class="card bg-dark text-light shadow-lg p-4 border-0 rounded-3">
-            <h1 class="mb-4">Resultados de los archivos DICOM</h1>
-            
+        <div class="card table-container-card">
+            <h1>Resultados de los archivos DICOM</h1>
+
             <div class="table-responsive">
-                <table class="table table-hover table-bordered align-middle text-center">
-                    <thead class="table-secondary text-dark">
+                <table class="table udg-style">
+                    <thead>
                         <tr>
                             <th>Paciente</th>
                             <th>Tipo</th>
@@ -29,7 +29,7 @@
             <!-- Selección del paciente -->
             <div id="selectionContainer" class="mt-4 d-none">
                 <p id="selectedText" class="lead"></p>
-                <button id="acceptButton" class="btn btn-success btn-lg shadow-sm" onclick="acceptSelection()">
+                <button id="acceptButton" class="btn btn-lg shadow-sm" onclick="acceptSelection()">
                     <i class="bi bi-check-circle"></i> Aceptar
                 </button>
             </div>
