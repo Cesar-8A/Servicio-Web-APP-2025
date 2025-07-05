@@ -29,6 +29,9 @@ from dash_extensions.enrich import DashProxy, MultiplexerTransform
 
 os.chdir("C:/Users/Usuario/OneDrive/flask")
 
+#os.chdir("c:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
+#os.chdir("C:/Users/lozan/Downloads/Servicio-Web-APP-2025-branchChuy")
+
 app = Flask(__name__)
 app.secret_key = "clave_secreta_no_tan_secreta_jeje"
 
@@ -392,14 +395,27 @@ def exportar_dicom():
 
 @app.route("/render/<render>")
 def render(render):
-
     global panel_vtk
-    # Crear un nuevo cubo si no existe
-    if panel_vtk is None and app.config['Image'].any():
+    image = app.config.get('Image', None)
+
+    if image is None or image.size == 0:
+        return "❌ No hay imagen cargada o está vacía", 400
+
+    if image.ndim != 3:
+        return f"❌ Se esperaba una imagen 3D, pero se obtuvo una imagen con shape {image.shape}", 400
+
+    if panel_vtk is None:
         panel_vtk = create_render()
         start_bokeh_server(panel_vtk)
 
-    return render_template("render.html", success=(lambda: 0 if type(panel_vtk)==None else 1), render=render, max_value_axial=app.config['Image'].shape[0]-1 , max_value_sagital=app.config['Image'].shape[1]-1 , max_value_coronal=app.config['Image'].shape[2]-1)  # Tamaño fijo o dinámico
+    return render_template(
+        "render.html",
+        success=(0 if panel_vtk is None else 1),
+        render=render,
+        max_value_axial=image.shape[0] - 1,
+        max_value_sagital=image.shape[1] - 1,
+        max_value_coronal=image.shape[2] - 1
+    )
 
 
 @app.route('/image/<view>/<int:layer>')

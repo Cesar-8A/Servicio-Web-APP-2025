@@ -1,122 +1,146 @@
- {% extends "home.html" %}
+{% extends "home.html" %}
 
-  {% block content %}
-  <div class="container mt-4 text-center">
-      {% if success == 0 %}
-          <h1 class="text-light">Carga primero una imagen</h1>
-      {% else %}
-          <div class="card bg-dark text-light shadow-lg p-4 border-0 rounded-3">
-              <h1 class="mb-3">Visualización DICOM</h1>
-              <p class="lead">Renderizado de la imagen cargada.</p>
-  
-              <!-- Subir RT Struct (NRRD) -->
-              <div class="mt-4">
-                  <h2 class="text-light">Subir Segmentación (NRRD)</h2>
-                  <form action="/upload_RT" method="post" enctype="multipart/form-data" class="mt-3">
-                      <div class="input-group w-50 mx-auto">
-                          <input type="file" name="file" accept=".nrrd" class="form-control bg-secondary text-light border-0 shadow-sm">
-                          <button type="submit" class="btn btn-success"><i class="bi bi-upload"></i> Subir</button>
-                      </div>
-                  </form>
+{% block content %}
+<div class="container-fluid p-0 m-0">
+  {% if success == 0 %}
+    <div class="text-center mt-5">
+      <h1 class="text-light">Carga primero una imagen</h1>
+    </div>
+  {% else %}
+
+    <div class="row g-0">
+      <!-- Sidebar izquierda con botón RT Struct -->
+      <div class="col-md-2 bg-dark d-flex align-items-start justify-content-start flex-column p-3 border-end border-secondary" style="min-height: 100vh;">
+        <h5 class="text-light mb-3">Subir RT Struct</h5>
+        <form action="/upload_RT" method="post" enctype="multipart/form-data" class="d-flex flex-column gap-2 w-100">
+          <input type="file" name="file" accept=".nrrd" class="form-control bg-secondary text-light border-0 shadow-sm" required>
+          <button type="submit" class="btn btn-success shadow-sm w-100">
+            <i class="bi bi-upload"></i> Subir
+          </button>
+        </form>
+      </div>
+
+      <!-- Área de cuadrantes -->
+      <div class="col-md-10 p-3">
+        <div class="row g-3" style="height: 90vh; min-height: 600px;">
+          {% set views = [
+            ('axial', max_value_axial),
+            ('sagital', max_value_sagital),
+            ('coronal', max_value_coronal),
+            ('3D', None)
+          ] %}
+          {% for view, max_val in views %}
+          <div class="col-md-6 d-flex flex-column">
+            <div id="card_{{ view }}" class="card bg-dark text-light flex-fill border-0 shadow position-relative">
+              <div class="card-body d-flex flex-column">
+
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h5 class="card-title mb-0">Vista {{ view|upper }}</h5>
+                  <button type="button" class="btn btn-sm btn-outline-light" onclick="toggleFullscreen('card_{{ view }}')">
+                    <i class="bi bi-arrows-fullscreen"></i>
+                  </button>
+                </div>
+
+                {% if view != '3D' %}
+                <div class="d-flex gap-2 align-items-center">
+                  <input type="range" id="slider_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-range">
+                  <input type="number" id="number_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-control form-control-sm w-25">
+                </div>
+                <div class="image-wrapper mt-3">
+                    <img id="image_{{ view }}" src="/image/{{ view }}/0" class="rounded" alt="{{ view }}" />
+                </div>
+
+                {% else %}
+                <div class="iframe-wrapper mt-3">
+                    <iframe 
+                        src="http://127.0.0.1:5010/panel" 
+                        id="DicomRender" 
+                        class="rounded border-0" 
+                        allowfullscreen
+                    ></iframe>
+                </div>
+
+                {% endif %}
+
               </div>
-          </div>
-  
-          <!-- Grid de 4 vistas -->
-        <div class="container mt-5">
-            <div class="row g-4">
-                <!-- Vista Axial (superior izquierda) -->
-                <div class="col-md-6">
-                    <div class="card bg-dark text-light border-0 shadow">
-                        <div class="card-body">
-                            <h5 class="card-title">Vista Axial</h5>
-                            <input type="range" id="slider_axial" min="0" max="{{ max_value_axial }}" value="{{max_value_axial//2}}">
-                            <input type="number" id="number_axial" min="0" max="{{ max_value_axial }}" value="{{max_value_axial//2}}">
-                            <img id="image_axial" src="/image/axial/0" class="img-fluid mt-2" alt="Axial" />
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Vista 3D (superior derecha) -->
-                <div class="col-md-6">
-                    <div class="card bg-dark text-light border-0 shadow">
-                        <div class="card-body">
-                            <h5 class="card-title">Vista 3D</h5>
-                            <iframe src="http://127.0.0.1:5010/panel" id="DicomRender" width="100%" height="500" class="border-0 rounded-3"></iframe>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Vista Sagital (inferior izquierda) -->
-                <div class="col-md-6">
-                    <div class="card bg-dark text-light border-0 shadow">
-                        <div class="card-body">
-                            <h5 class="card-title">Vista Sagital</h5>
-                            <input type="range" id="slider_sagital" min="0" max="{{ max_value_sagital }}" value="{{max_value_sagital//2}}">
-                            <input type="number" id="number_sagital" min="0" max="{{ max_value_sagital }}" value="{{max_value_sagital//2}}">
-                            <img id="image_sagital" src="/image/sagital/0" class="img-fluid mt-2" alt="Sagital" height="500" />
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Vista Coronal (inferior derecha) -->
-                <div class="col-md-6">
-                    <div class="card bg-dark text-light border-0 shadow">
-                        <div class="card-body">
-                            <h5 class="card-title">Vista Coronal</h5>
-                            <input type="range" id="slider_coronal" min="0" max="{{ max_value_coronal }}" value="{{max_value_coronal//2}}">
-                            <input type="number" id="number_coronal" min="0" max="{{ max_value_coronal }}" value="{{max_value_coronal//2}}">
-                            <img id="image_coronal" src="/image/coronal/0" class="img-fluid mt-2" alt="Coronal" />
-                        </div>
-                    </div>
-                </div>
             </div>
+          </div>
+          {% endfor %}
         </div>
-  
-          <!-- JS de sincronización -->
-          <script>
-              function setupSlider(view) {
-                  const slider = document.getElementById(`slider_${view}`);
-                  const number = document.getElementById(`number_${view}`);
-                  const image = document.getElementById(`image_${view}`);
-  
-                  function updateImage(layer) {
-                      image.src = `/image/${view}/${layer}?t=${new Date().getTime()}`;
-                  }
-  
-                  slider.addEventListener('input', () => {
-                      number.value = slider.value;
-                      updateImage(slider.value);
-                  });
-  
-                  number.addEventListener('input', () => {
-                      let val = Number(number.value);
-                      if (val < slider.min) val = slider.min;
-                      if (val > slider.max) val = slider.max;
-                      slider.value = val;
-                      updateImage(val);
-                  });
-              }
-  
-              setupSlider('axial');
-              setupSlider('sagital');
-              setupSlider('coronal');
-          </script>
-  
-          <!-- JS para alert de subida -->
-          <script>
-              document.querySelector("form").addEventListener("submit", function(event) {
-                  event.preventDefault();  
-                  let formData = new FormData(this);
-  
-                  fetch("/upload_RT", {
-                      method: "POST",
-                      body: formData
-                  });
-  
-                  alert("Archivo cargado correctamente.");
-              });
-          </script>
-      {% endif %}
-  </div>
-  {% endblock %}
+      </div>
+    </div>
 
+    <!-- JS sliders -->
+    <script>
+      function setupSlider(view) {
+        const slider = document.getElementById(`slider_${view}`);
+        const number = document.getElementById(`number_${view}`);
+        const image = document.getElementById(`image_${view}`);
+
+        function updateImage(layer) {
+          image.src = `/image/${view}/${layer}?t=${new Date().getTime()}`;
+        }
+
+        slider.addEventListener('input', () => {
+          number.value = slider.value;
+          updateImage(slider.value);
+        });
+
+        number.addEventListener('input', () => {
+          let val = Number(number.value);
+          if (val < slider.min) val = slider.min;
+          if (val > slider.max) val = slider.max;
+          slider.value = val;
+          updateImage(val);
+        });
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement) {
+                document.querySelector('.fullscreen')?.classList.remove('fullscreen');
+            }
+        });
+
+      }
+
+      setupSlider('axial');
+      setupSlider('sagital');
+      setupSlider('coronal');
+    </script>
+
+    <!-- JS fullscreen -->
+    <script>
+      function toggleFullscreen(id) {
+            const element = document.getElementById(id);
+
+            if (!document.fullscreenElement) {
+                element.requestFullscreen().then(() => {
+                    element.classList.add('fullscreen');
+                }).catch(err => {
+                    alert(`Error al entrar en pantalla completa: ${err.message}`);
+                });
+            } else {
+                document.exitFullscreen().then(() => {
+                    document.querySelector('.fullscreen')?.classList.remove('fullscreen');
+                });
+            }
+      }
+
+    </script>
+
+    <!-- JS carga -->
+    <script>
+      document.querySelector("form").addEventListener("submit", function (event) {
+        event.preventDefault();
+        let formData = new FormData(this);
+
+        fetch("/upload_RT", {
+          method: "POST",
+          body: formData
+        }).then(() => {
+          alert("Archivo cargado correctamente.");
+        });
+      });
+    </script>
+
+  {% endif %}
+</div>
+{% endblock %}
