@@ -27,6 +27,9 @@ from dash import html, dcc, Input, Output, State
 import dash_vtk
 from dash_extensions.enrich import DashProxy, MultiplexerTransform
 
+from process_dicom_folder import process_dicom_folder
+
+
 os.chdir("C:/Users/Usuario/OneDrive/flask")
 
 #os.chdir("c:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
@@ -195,99 +198,6 @@ def start_bokeh_server(panel_vtk):
         pn.serve({'/panel': panel_vtk}, show=False, allow_websocket_origin=["*"], port=5010, threaded=True)
         bokeh_on = True
     
-def process_dicom_folder(directory):
-    """Procesa un directorio de archivos DICOM y devuelve un diccionario con la información."""
-    dicom_series = defaultdict(lambda: {
-        "ruta_archivos": [],
-        "paciente": None,
-        "tipo": None,
-        "dimensiones": None,
-        "RescaleSlope": 1,
-        "RescaleIntercept": 1,
-        "ImagePositionPatient": 1,
-        "ImageOrientationPatient": [],
-        "PixelSpacing": 0,
-        "SliceThickness": 0,
-        "slices": [
-        ],
-        "Anonimize": {
-            'PatientName': 'Nombre del paciente',
-            'PatientID': 'ID del paciente',
-            'PatientBirthDate': 'Fecha de nacimiento del paciente',
-            'PatientSex': 'Sexo del paciente',
-            'PatientAge': 'Edad del paciente',
-            'StudyDate': 'Fecha del estudio',
-            'StudyTime': 'Hora del estudio',
-            'AccessionNumber': 'Número de acceso',
-            'ReferringPhysicianName': 'Nombre del médico derivador',
-            'MedicalRecordLocator': 'Número de historia clínica',
-            'InstitutionName': 'Nombre de la institución',
-            'InstitutionAddress': 'Dirección de la institución',
-            'StudyDescription': 'Descripción del estudio',
-            'SeriesDescription': 'Descripción de la serie',
-            'OperatorName': 'Nombre del operador',
-            'SeriesNumber': 'Número de la serie',
-            'InstanceNumber': 'Número de la instancia',
-        }
-    })
-    # Recorrer la carpeta de manera recursiva
-    for file in directory:
-        #file_path = os.path.join(root, file)
-        try:
-            # Intentar leer el archivo como DICOM
-            dicom_data = pydicom.dcmread(file, stop_before_pixels=False,  force=True)
-            # Identificar la serie única usando StudyInstanceUID y SeriesInstanceUID
-            study_id = dicom_data.StudyInstanceUID
-            series_id = dicom_data.SeriesInstanceUID
-            unique_id = f"{study_id}-{series_id}"
-
-            # Obtener el nombre del paciente
-            paciente_nombre = dicom_data.PatientName if 'PatientName' in dicom_data else "Desconocido"
-            
-            # Agregar el archivo a la serie correspondiente en el diccionario
-            dicom_series[unique_id]["ruta_archivos"].append(file)
-            dicom_series[unique_id]["paciente"] = paciente_nombre
-            dicom_series[unique_id]["dimensiones"] = (len(dicom_series[unique_id]["ruta_archivos"]), dicom_data.Rows, dicom_data.Columns)
-            dicom_series[unique_id]["RescaleSlope"] = dicom_data.RescaleSlope
-            dicom_series[unique_id]["RescaleIntercept"] = dicom_data.RescaleIntercept
-            dicom_series[unique_id]["ImagePositionPatient"] = dicom_data.ImagePositionPatient
-            dicom_series[unique_id]["PixelSpacing"] = dicom_data.PixelSpacing  
-            dicom_series[unique_id]["SliceThickness"] = dicom_data.get("SliceThickness", 1)
-
-            ##Anonimize
-            dicom_series[unique_id]['Anonimize']['PatientName'] = dicom_data.PatientName
-            dicom_series[unique_id]['Anonimize']['PatientID'] = dicom_data.PatientID 
-            dicom_series[unique_id]['Anonimize']['PatientBirthDate'] = dicom_data.PatientBirthDate 
-            dicom_series[unique_id]['Anonimize']['PatientSex'] = dicom_data.PatientSex 
-            dicom_series[unique_id]['Anonimize']['PatientAge'] = dicom_data.PatientAge 
-            dicom_series[unique_id]['Anonimize']['StudyDate'] = dicom_data.StudyDate 
-            dicom_series[unique_id]['Anonimize']['StudyTime'] = dicom_data.StudyTime 
-            dicom_series[unique_id]['Anonimize']['AccessionNumber'] = dicom_data.AccessionNumber 
-            dicom_series[unique_id]['Anonimize']['ReferringPhysicianName'] = dicom_data.ReferringPhysicianName 
-            dicom_series[unique_id]['Anonimize']['MedicalRecordLocator'] = dicom_data.MedicalRecordLocator 
-            dicom_series[unique_id]['Anonimize']['InstitutionName'] = dicom_data.InstitutionName 
-            dicom_series[unique_id]['Anonimize']['InstitutionAddress'] = dicom_data.InstitutionAddress 
-            dicom_series[unique_id]['Anonimize']['StudyDescription'] = dicom_data.StudyDescription 
-            dicom_series[unique_id]['Anonimize']['SeriesDescription'] = dicom_data.SeriesDescription 
-            dicom_series[unique_id]['Anonimize']['OperatorName'] = dicom_data.OperatorName 
-            dicom_series[unique_id]['Anonimize']['SeriesNumber'] = dicom_data.SeriesNumber 
-            dicom_series[unique_id]['Anonimize']['InstanceNumber'] = dicom_data.InstanceNumber 
-
-
-
-            if len(dicom_series[unique_id]["ruta_archivos"]) > 1:
-                dicom_series[unique_id]["tipo"] = "3D"
-            else:
-                dicom_series[unique_id]["tipo"] = "2D"
-            #dicom_series[unique_id]["slices"].append([dicom_data.get("InstanceNumber", "None"),dicom_data.pixel_array])
-            
-        
-        except Exception as e:
-            # Si el archivo no es DICOM, lo ignoramos
-            continue
-
-    app.config['dicom_series']  = dicom_series.copy()
-    return dicom_series
 
 @app.route('/process_selected_dicom', methods=['POST'])
 def process_selected_dicom():
@@ -418,64 +328,14 @@ def render(render):
     )
 
 
+from get_image import generate_slice_image
+
 @app.route('/image/<view>/<int:layer>')
 def get_image(view, layer):
-    image = app.config['Image']
-    unique_id = app.config["unique_id"]
-
-    # Aplicar Rescale Slope e Intercept
-    slope = app.config['dicom_series'][unique_id]["RescaleSlope"]
-    intercept = app.config['dicom_series'][unique_id]["RescaleIntercept"]
-    image = image * slope + intercept
-
-    # Obtener el espaciado
-    slice_thickness = app.config['dicom_series'][unique_id]["SliceThickness"]
-    pixel_spacing = app.config['dicom_series'][unique_id]["PixelSpacing"]
-
-    # Guardar la segmentación en rt, si no está no se ejecuta
-    rt = app.config.get('RT_aligned')
-    show_seg = rt is not None
-
-    if view == 'axial':
-        slice_img = image[layer, :, :]
-        seg_slice = np.flip(rt[:, :, layer], axis=0) if show_seg else None
-        aspect_ratio = pixel_spacing[1] / pixel_spacing[0]
-    elif view == 'sagital':
-        slice_img = image[:, layer, :]
-        seg_slice = np.flip(rt[:, layer, :], axis=0) if show_seg else None
-        aspect_ratio = slice_thickness / pixel_spacing[0]
-    elif view == 'coronal':
-        seg_slice = np.flip(rt[layer, :, :], axis=0) if show_seg else None
-        slice_img = image[:, :, layer]
-        aspect_ratio = slice_thickness / pixel_spacing[1]
-    else:
-        return "Vista no válida", 400
-
-    if show_seg:
-        slice_img = np.flip(slice_img, axis=0)
-
-    # Ajustar y mostrar la imagen
-    plt.figure(figsize=(6, 6))
-    plt.imshow(slice_img, cmap='gray', aspect=aspect_ratio)
-    plt.axis('off')
-
-    # Mostrar la segmentación
-    if show_seg:
-        # Voltear la máscara
-        flipped_seg = np.flip((seg_slice > 1).T)
-        # Enmascarar ceros: solo dibujar donde hay segmentación
-        masked_seg = ma.masked_where(flipped_seg == 0, flipped_seg)
-        # Overlay solo la segmentación
-        plt.imshow(masked_seg, cmap='Reds', alpha=0.8, aspect=aspect_ratio, origin='lower',
-                   vmin=0, vmax=1)
-        
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
-    plt.close()
-    buf.seek(0)
+    buf, error_message, status_code = generate_slice_image(view, layer)
+    if status_code != 200:
+        return error_message, status_code
     return send_file(buf, mimetype='image/png')
-
-
 
 
 def allowed_file(filename):
