@@ -45,7 +45,7 @@
                 .then(data => {
                     console.log("Metadatos cargados:", data.metadata);
 
-                    document.getElementById("selectedText").innerText = "Paciente seleccionado: " + data.metadata;
+                    document.getElementById("selectedText").innerText = "Paciente seleccionado: " + data.PatientName;
                     document.getElementById("selectionContainer").classList.remove("d-none");
                     
                     selectedId = unique_id;

@@ -254,54 +254,21 @@ def guardar_cambios():
 
     return jsonify({"mensaje": "Cambios guardados correctamente"})
 
+################################################################
+from dicom_export import export_dicom_series
+
 @app.route('/exportar_dicom', methods=['POST'])
 def exportar_dicom():
-    unique_id = app.config['unique_id']  # Obtener el ID único de la serie DICOM seleccionada
-
+    unique_id = app.config.get('unique_id')
     if not unique_id:
         return jsonify({"error": "Datos inválidos"}), 400
 
-    # Obtener la lista de archivos DICOM de la serie seleccionada
-    archivosDicom = app.config['dicom_series'][unique_id]["ruta_archivos"]
-
-    # Procesar cada archivo DICOM
-    for archivo in archivosDicom:
-        try:
-            # Leer el archivo DICOM
-            dicom_data = pydicom.dcmread(archivo)
-
-            # Aplicar los cambios de anonimización
-            for campo, valor in app.config['dicom_series'][unique_id]['Anonimize'].items():
-                if campo in dicom_data:
-                    # Asignar el valor como texto (sin formato específico)
-                    try:
-                        dicom_data[campo].value = str(valor)
-                    except:
-                        dicom_data[campo].value = 0
-
-            # Crear el nuevo nombre del archivo anonimizado
-            nombreArchivo = os.path.basename(archivo)
-            nombreAnonimizado = f"anonimo_{nombreArchivo}"  # Concatenar "anonimo_" al nombre
-            rutaDestino = os.path.join(ANONIMIZADO_FOLDER, nombreAnonimizado)
-
-            # Guardar el archivo anonimizado en la carpeta "anonimizado"
-            dicom_data.save_as(rutaDestino)
-
-        except Exception as e:
-            print(f"Error al procesar el archivo {archivo}: {e}")
-            continue
-
-    # Crear un archivo ZIP con los archivos anonimizados
-    zip_path = os.path.join(ANONIMIZADO_FOLDER, 'archivos_anonimizados.zip')
-    with zipfile.ZipFile(zip_path, 'w') as zipf:
-        for root, _, files in os.walk(ANONIMIZADO_FOLDER):
-            for file in files:
-                if file.endswith('.dcm'):  # Solo incluir archivos DICOM
-                    file_path = os.path.join(root, file)
-                    zipf.write(file_path, os.path.basename(file_path))
-
-    # Enviar el archivo ZIP al cliente
-    return send_file(zip_path, as_attachment=True, download_name='archivos_anonimizados.zip')
+    try:
+        zip_path = export_dicom_series(unique_id, ANONIMIZADO_FOLDER)
+        return send_file(zip_path, as_attachment=True, download_name='archivos_anonimizados.zip')
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+################################################################
 
 @app.route("/render/<render>")
 def render(render):
@@ -327,7 +294,7 @@ def render(render):
         max_value_coronal=image.shape[2] - 1
     )
 
-
+################################################################
 from get_image import generate_slice_image
 
 @app.route('/image/<view>/<int:layer>')
@@ -336,7 +303,7 @@ def get_image(view, layer):
     if status_code != 200:
         return error_message, status_code
     return send_file(buf, mimetype='image/png')
-
+################################################################
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {"nrrd"} #Añadir aqui mas extensiones permitidas para RT Struct
@@ -365,41 +332,18 @@ def upload_RT():
 
     return render_template("render.html", max_value_axial=app.config['Image'].shape[0]-1 , max_value_sagital=app.config['Image'].shape[1]-1 , max_value_coronal=app.config['Image'].shape[2]-1)  # Tamaño fijo o dinámico 
         
+################################################################
+from dicom_metadata import load_metadata_and_slices
 
 @app.route('/loadDicomMetadata/<unique_id>')
 def load_dicom_metadata(unique_id):
-    global selected_dicom_metadata, selected_dicom_slices
-    dicom_series = app.config['dicom_series'] 
+    try:
+        metadata = load_metadata_and_slices(unique_id)
+        return jsonify(metadata)
 
-    # Obtener la lista de archivos DICOM asociados a la serie seleccionada
-    dicom_files = dicom_series[unique_id]["ruta_archivos"]
-    # Leer los metadatos del primer archivo (puedes ajustar esto según tus necesidades)
-    dicom_data = pydicom.dcmread(dicom_files[0], stop_before_pixels=False, force = True)
-    
-    selected_dicom_metadata = {
-        "PatientName": dicom_data.get("PatientName", "Desconocido"),
-        "StudyDate": dicom_data.get("StudyDate", "Desconocido"),
-        "Modality": dicom_data.get("Modality", "Desconocido"),
-        # Agrega más metadatos según sea necesario
-    }
-    # Leer y ordenar los slices según el InstanceNumber
-    slices = []
-    for file in dicom_files:
-        dicom_data = pydicom.dcmread(file, stop_before_pixels=False)
-        instance_number = int(dicom_data.get("InstanceNumber", 0))
-        pixel_array = dicom_data.pixel_array  # Obtener el array de píxeles
-        slices.append((instance_number, pixel_array))
-
-    # Ordenar los slices por InstanceNumber
-    slices.sort(key=lambda x: x[0])
-    selected_dicom_slices = np.array([slice[1] for slice in slices]) # Convertir a numpy array
-    app.config['dicom_series'][unique_id]["slices"] = selected_dicom_slices
-
-    # Devolver los metadatos y slices como JSON
-    return jsonify({
-        "metadata": str(selected_dicom_metadata["PatientName"]),
-        #"slices": selected_dicom_slices,  # Convertir a lista para JSON
-    })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+################################################################
 
 
 @app.route('/loadDicom', methods=['GET', 'POST'])
