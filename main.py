@@ -74,122 +74,6 @@ if not os.path.exists(UPLOAD_FOLDER_NRRD):
 pn.extension('vtk')  # Activar la extensión VTK de Panel
 
 
-def create_render():
-    
-    global plotter, skin_actor, slider, grid_dicom, panel_column
-
-    panel_column = pn.Column() # Contenedor global para actualizaciones dinámicas
-
-    volume_bone = ((app.config['Image'] > 175) * 1).astype(np.int16)
-    volume_skin = (((app.config['Image'] > -200) & (app.config['Image'] < 0)) * 1).astype(np.int16)
-    unique_id = app.config["unique_id"]
-
-    origin = app.config['dicom_series'][unique_id]["ImagePositionPatient"]
-    spacing = (
-        app.config['dicom_series'][unique_id]["SliceThickness"],
-        app.config['dicom_series'][unique_id]["PixelSpacing"][0],
-        app.config['dicom_series'][unique_id]["PixelSpacing"][1],
-    )
-
-    # --- HUESO GRID ---
-    grid_bone = pv.ImageData()
-    grid_bone.dimensions = np.array(volume_bone.shape) + 1
-    grid_bone.origin = origin
-    grid_bone.spacing = spacing
-    grid_bone.cell_data["values"] = volume_bone.flatten(order="F")
-    grid_bone = grid_bone.cell_data_to_point_data()
-    surface_bone = grid_bone.contour([0.5])
-
-    # --- PIEL GRID ---
-    grid_skin = pv.ImageData()
-    grid_skin.dimensions = np.array(volume_skin.shape) + 1
-    grid_skin.origin = origin
-    grid_skin.spacing = spacing
-    grid_skin.cell_data["values"] = volume_skin.flatten(order="F")
-    grid_skin = grid_skin.cell_data_to_point_data()
-    surface_skin = grid_skin.contour([0.5])
-    
-    # Para usarse después y plotear segmentaciones
-    grid_dicom = grid_skin
-    
-    # --- PLOTTING ---
-    plotter = pv.Plotter(off_screen=True)
-    plotter.set_background("black")
-    plotter.add_mesh(surface_bone, color="white", smooth_shading=True, ambient=0.3, specular=0.4, specular_power=10)
-    skin_actor = plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, name="skin", smooth_shading=True)  # Piel transparente
-
-    plotter.view_isometric()
-    plotter.show_axes()
-
-    panel_vtk = pn.pane.VTK(plotter.ren_win, width=400, height=500)
-
-    # --- SLIDER + CALLBACK ---
-    slider = pn.widgets.FloatSlider(name="Opacidad de la piel", start=0.0, end=1.0, step=0.05, value=0.5)
-
-    def update_opacity(event):  # Actualizar la opacidad de la piel
-        skin_actor.GetProperty().SetOpacity(event.new)
-        panel_vtk.param.trigger('object')
-
-    slider.param.watch(update_opacity, 'value')
-
-    panel_column[:] = [panel_vtk, slider]
-
-    return panel_column
-
-
-def add_RT_to_plotter():
-    global plotter, panel_vtk, mask_actor
-
-    if plotter is None:
-        print("No hay plotter activo.")
-        return
-
-    RT_Image = np.flip(app.config['RT'], axis=(0, 1, 2)) # Voltear las posiciones 1 y 3 para que el 3D quede alineado
-    RT_Image = RT_Image.transpose(2, 0, 1) # Formato NRRD: (X, Y, Z), cambiar para coincidir con DICOM 
-    RT_2D = np.flip(app.config['RT'], axis=(2))
-    app.config['RT_aligned'] = RT_2D
-
-    # Asignar los mismos origin y spacing del grid de DICOM para estar en el mismo espacio físico
-    rt_grid = pv.ImageData()
-    rt_grid.dimensions = np.array(RT_Image.shape) + 1
-    rt_grid.origin = grid_dicom.origin
-    rt_grid.spacing = grid_dicom.spacing
-    
-    # Asignar segmentación binaria
-    rt_grid.cell_data["values"] = (RT_Image > 1).astype(np.uint8).flatten(order="F")
-
-    # Convertir a point_data para que funcione contour() y Generar superficie con isovalor 0.5
-    rt_grid = rt_grid.cell_data_to_point_data()
-    surface = rt_grid.contour([0.5])
-
-    # Agregar la malla segmentada al plotter
-    mask_actor = plotter.add_mesh(surface, color="red", opacity=0.5, smooth_shading=True, specular=0.3)
-    
-    # Actualizar la opacidad de la piel
-    def update_opacity(event):  
-        skin_actor.GetProperty().SetOpacity(event.new)
-        panel_vtk.param.trigger('object')
-    slider.param.watch(update_opacity, 'value')
-
-    # Apagar y prender máscara
-    toggle_button = pn.widgets.Toggle(name='Mostrar/Ocultar máscara', button_type='danger', value=True)
-
-    def toggle_mask_visibility(event):
-        if event.new:
-            mask_actor.GetProperty().SetOpacity(0.5)
-        else:
-            mask_actor.GetProperty().SetOpacity(0.0)
-          
-    toggle_button.param.watch(toggle_mask_visibility, 'value')
-
-    # Actualizar el plotter y el panel
-    plotter.render() 
-    panel_vtk.object = plotter.ren_win
-    panel_column.append(toggle_button)
-
-    return panel_column
-
-
 # Iniciar el servidor Bokeh una sola vez al iniciar la aplicación
 def start_bokeh_server(panel_vtk):
     global bokeh_on
@@ -270,6 +154,8 @@ def exportar_dicom():
         return jsonify({"error": str(e)}), 500
 ################################################################
 
+from render import create_render
+
 @app.route("/render/<render>")
 def render(render):
     global panel_vtk
@@ -282,7 +168,9 @@ def render(render):
         return f"❌ Se esperaba una imagen 3D, pero se obtuvo una imagen con shape {image.shape}", 400
 
     if panel_vtk is None:
-        panel_vtk = create_render()
+        render_state = create_render()
+        app.config["render_state"] = render_state
+        panel_vtk = render_state["panel_column"]
         start_bokeh_server(panel_vtk)
 
     return render_template(
@@ -308,6 +196,8 @@ def get_image(view, layer):
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {"nrrd"} #Añadir aqui mas extensiones permitidas para RT Struct
 
+from rt import add_RT_to_plotter
+
 @app.route("/upload_RT", methods=["POST"])
 def upload_RT():
     global panel_vtk, plotter
@@ -328,7 +218,8 @@ def upload_RT():
     app.config['RT'], _ = nrrd.read(filepath)
     
     # Llamar a la función y actualizar el panel
-    panel_vtk = add_RT_to_plotter()
+    render_state = app.config.get("render_state")
+    panel_vtk = add_RT_to_plotter(render_state)
 
     return render_template("render.html", max_value_axial=app.config['Image'].shape[0]-1 , max_value_sagital=app.config['Image'].shape[1]-1 , max_value_coronal=app.config['Image'].shape[2]-1)  # Tamaño fijo o dinámico 
         
