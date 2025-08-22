@@ -18,6 +18,15 @@
             <i class="bi bi-upload"></i> Subir
           </button>
         </form>
+
+        <!-- NUEVO: Herramientas (HU Picker) -->
+        <hr class="text-secondary w-100 my-3">
+        <h5 class="text-light mb-2">Herramientas</h5>
+        <button id="huToggle" class="btn btn-outline-info w-100 mb-2">
+          Activar Selector HU
+        </button>
+        <small id="huInfo" class="text-secondary"></small>
+        <div id="huResult" class="small text-warning mt-2"></div>
       </div>
 
       <!-- Área de cuadrantes -->
@@ -46,20 +55,22 @@
                   <input type="range" id="slider_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-range">
                   <input type="number" id="number_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-control form-control-sm w-25">
                 </div>
-                <div class="image-wrapper mt-3">
-                    <img id="image_{{ view }}" src="/image/{{ view }}/0" class="rounded" alt="{{ view }}" />
+
+                <!-- NUEVO: overlay canvas por vista 2D -->
+                <div class="image-wrapper mt-3 position-relative">
+                  <img id="image_{{ view }}" src="/image/{{ view }}/0" class="rounded w-100 h-auto d-block" alt="{{ view }}" />
+                  <canvas id="overlay_{{ view }}" class="position-absolute top-0 start-0" style="pointer-events:none;"></canvas>
                 </div>
 
                 {% else %}
                 <div class="iframe-wrapper mt-3">
-                    <iframe 
-                        src="http://127.0.0.1:5010/panel" 
-                        id="DicomRender" 
-                        class="rounded border-0" 
-                        allowfullscreen
-                    ></iframe>
+                  <iframe
+                    src="http://127.0.0.1:5010/panel"
+                    id="DicomRender"
+                    class="rounded border-0"
+                    allowfullscreen
+                  ></iframe>
                 </div>
-
                 {% endif %}
 
               </div>
@@ -70,7 +81,7 @@
       </div>
     </div>
 
-    <!-- JS sliders -->
+    <!-- JS sliders (sin cambios funcionales) -->
     <script>
       function setupSlider(view) {
         const slider = document.getElementById(`slider_${view}`);
@@ -93,12 +104,12 @@
           slider.value = val;
           updateImage(val);
         });
-        document.addEventListener('fullscreenchange', () => {
-            if (!document.fullscreenElement) {
-                document.querySelector('.fullscreen')?.classList.remove('fullscreen');
-            }
-        });
 
+        document.addEventListener('fullscreenchange', () => {
+          if (!document.fullscreenElement) {
+            document.querySelector('.fullscreen')?.classList.remove('fullscreen');
+          }
+        });
       }
 
       setupSlider('axial');
@@ -106,27 +117,153 @@
       setupSlider('coronal');
     </script>
 
-    <!-- JS fullscreen -->
+    <!-- JS HU picker  -->
     <script>
-      function toggleFullscreen(id) {
-            const element = document.getElementById(id);
+      // --- Estado del HU picker ---
+      const huToggle = document.getElementById("huToggle");   // Botón para activar/desactivar el modo HU
+      const huInfo   = document.getElementById("huInfo");     // Texto de instrucciones debajo del botón
+      const huResult = document.getElementById("huResult");   // Texto donde se muestra el resultado (valor HU)
+      let huMode = false;                                     // Estado actual: activado/desactivado
 
-            if (!document.fullscreenElement) {
-                element.requestFullscreen().then(() => {
-                    element.classList.add('fullscreen');
-                }).catch(err => {
-                    alert(`Error al entrar en pantalla completa: ${err.message}`);
-                });
-            } else {
-                document.exitFullscreen().then(() => {
-                    document.querySelector('.fullscreen')?.classList.remove('fullscreen');
-                });
-            }
+      // --- Función utilitaria: ajusta el canvas al tamaño en pantalla del <img> (considerando DPR) ---
+      function syncCanvasToImage(imgEl, canvasEl) {
+        const dpr = window.devicePixelRatio || 1;             // DPI del dispositivo (para pantallas retina)
+        const rect = imgEl.getBoundingClientRect();           // Dimensiones del <img> en CSS
+        canvasEl.width  = Math.max(1, Math.round(rect.width  * dpr));
+        canvasEl.height = Math.max(1, Math.round(rect.height * dpr));
+        canvasEl.style.width  = rect.width + "px";            // Tamaño en CSS
+        canvasEl.style.height = rect.height + "px";
+        const ctx = canvasEl.getContext("2d");
+        ctx.setTransform(1,0,0,1,0,0);                        // Reset de transformaciones
+        ctx.scale(dpr, dpr);                                  // Escalado según DPI
+        return ctx;
       }
 
+      // --- Dibuja un marcador (círculo rojo) en el canvas ---
+      function drawMarker(ctx, xCss, yCss) {
+        ctx.fillStyle = "red";
+        ctx.beginPath();
+        ctx.arc(xCss, yCss, 5, 0, 2*Math.PI);
+        ctx.fill();
+      }
+
+      // --- Convierte coordenadas CSS de un click en coordenadas de píxel de la imagen PNG ---
+      function cssToPngPixels(imgEl, evt) {
+        const rect = imgEl.getBoundingClientRect();
+        const nW = imgEl.naturalWidth;   // ancho original de la imagen en píxeles
+        const nH = imgEl.naturalHeight;  // alto original de la imagen en píxeles
+
+        const dispW = rect.width;        // ancho mostrado en pantalla
+        const dispH = rect.height;       // alto mostrado en pantalla
+
+        // Escalas de conversión entre CSS y píxeles reales
+        const scaleX = dispW / nW;
+        const scaleY = dispH / nH;
+
+        // Coordenadas del click relativas al <img>
+        const xCss = evt.clientX - rect.left;
+        const yCss = evt.clientY - rect.top;
+
+        // Si el click quedó fuera de la imagen, cancelar
+        if (xCss < 0 || yCss < 0 || xCss > dispW || yCss > dispH) return null;
+
+        // Convertir a coordenadas de píxel en la imagen original
+        const xPix = Math.floor(xCss / scaleX);
+        const yPix = Math.floor(yCss / scaleY);
+        return { xPix, yPix, xCss, yCss };
+      }
+
+      // --- Asigna la lógica HU picker a una vista específica (axial, sagital, coronal) ---
+      function bindHU(view) {
+        const img   = document.getElementById(`image_${view}`);   // Imagen base
+        const canvas = document.getElementById(`overlay_${view}`);// Canvas overlay encima
+        let ctx = null;
+
+        // Resetea el canvas cuando cambia el tamaño o la imagen
+        function resetCanvas() {
+          ctx = syncCanvasToImage(img, canvas);
+          ctx.clearRect(0,0,canvas.width, canvas.height);
+        }
+
+        img.addEventListener("load", resetCanvas);
+        if (img.complete) { resetCanvas(); } // Si ya está cargada, lo hace de inmediato
+
+        // Evento click en la imagen
+        img.addEventListener("click", (evt) => {
+          if (!huMode) return;  // Si no está en modo HU, no hacer nada
+
+          const mapped = cssToPngPixels(img, evt);  // Convertir click a píxeles
+          if (!mapped) {
+            huResult.textContent = "Clicked outside image.";
+            return;
+          }
+
+          // Obtener el índice actual del slider correspondiente a esta vista
+          const slider = document.getElementById(`slider_${view}`);
+          const idx = parseInt(slider.value, 10);
+
+          // Llamar al servidor para obtener el valor HU en esa coordenada
+          fetch(`/hu_value?view=${view}&x=${mapped.xPix}&y=${mapped.yPix}&index=${idx}`)
+            .then(r => r.json())
+            .then(data => {
+              if (data.error) {
+                huResult.textContent = "Error: " + data.error;
+                return;
+              }
+              // Mostrar resultado detallado
+              huResult.textContent = `HU (${view}, index=${idx}) @ 2D(x=${mapped.xPix}, y=${mapped.yPix}) → voxel(z=${data.voxel.z}, y=${data.voxel.y}, x=${data.voxel.x}): HU=${data.hu}`;
+              // Dibujar marcador donde se hizo click
+              drawMarker(ctx, mapped.xCss, mapped.yCss);
+            })
+            .catch(() => { huResult.textContent = "Error fetching HU value."; });
+        });
+
+        // Redibujar overlay si se cambia el tamaño de la ventana
+        window.addEventListener("resize", resetCanvas);
+      }
+
+      // --- Botón de activación/desactivación ---
+      huToggle.addEventListener("click", () => {
+        huMode = !huMode;
+        huToggle.textContent = huMode ? "Desactivar Selector HU" : "Activar Selector HU";
+        huInfo.textContent   = huMode ? "Haz click dentro de cualquier imagen para obtener las HU." : "";
+        // Limpiar overlays al desactivar
+        if (!huMode) {
+          ["axial","sagital","coronal"].forEach(v => {
+            const img = document.getElementById(`image_${v}`);
+            const canvas = document.getElementById(`overlay_${v}`);
+            const ctx = syncCanvasToImage(img, canvas);
+            ctx.clearRect(0,0,canvas.width, canvas.height);
+          });
+        }
+      });
+
+      // --- Vincular las tres vistas 2D ---
+      ["axial","sagital","coronal"].forEach(bindHU);
+    </script>
+      
+     
+
+    <!-- JS fullscreen (sin cambios) -->
+    <script>
+      function toggleFullscreen(id) {
+        const element = document.getElementById(id);
+
+        if (!document.fullscreenElement) {
+          element.requestFullscreen().then(() => {
+            element.classList.add('fullscreen');
+          }).catch(err => {
+            alert(`Error al entrar en pantalla completa: ${err.message}`);
+          });
+        } else {
+          document.exitFullscreen().then(() => {
+            document.querySelector('.fullscreen')?.classList.remove('fullscreen');
+          });
+        }
+      }
     </script>
 
-    <!-- JS carga -->
+    <!-- JS carga (sin cambios) -->
     <script>
       document.querySelector("form").addEventListener("submit", function (event) {
         event.preventDefault();
