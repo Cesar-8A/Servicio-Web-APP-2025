@@ -9,6 +9,7 @@ import tempfile
 import zipfile
 from collections import defaultdict
 import numpy as np
+import numpy.ma as ma
 import pyvista as pv
 pv.OFF_SCREEN = True
 import panel as pn
@@ -25,8 +26,14 @@ import dash
 from dash import html, dcc, Input, Output, State
 import dash_vtk
 from dash_extensions.enrich import DashProxy, MultiplexerTransform
+from io import BytesIO
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-os.chdir("c:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
+
+os.chdir("C:/Users/Usuario/OneDrive/flask")
+
+#os.chdir("c:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
+#os.chdir("C:/Users/lozan/Downloads/Servicio-Web-APP-2025-branchChuy")
 
 app = Flask(__name__)
 app.secret_key = "clave_secreta_no_tan_secreta_jeje"
@@ -69,7 +76,9 @@ pn.extension('vtk')  # Activar la extensión VTK de Panel
 
 def create_render():
     
-    global plotter, skin_actor, slider, grid_dicom
+    global plotter, skin_actor, slider, grid_dicom, panel_column
+
+    panel_column = pn.Column() # Contenedor global para actualizaciones dinámicas
 
     volume_bone = ((app.config['Image'] > 175) * 1).astype(np.int16)
     volume_skin = (((app.config['Image'] > -200) & (app.config['Image'] < 0)) * 1).astype(np.int16)
@@ -123,25 +132,26 @@ def create_render():
 
     slider.param.watch(update_opacity, 'value')
 
-    return pn.Column(panel_vtk, slider)
+    panel_column[:] = [panel_vtk, slider]
+
+    return panel_column
 
 
 def add_RT_to_plotter():
-    
     global plotter, panel_vtk, mask_actor
 
     if plotter is None:
         print("No hay plotter activo.")
         return
 
-    app.config['RT'] = np.flip(app.config['RT'], axis=(0, 2)) # Voltear las posiciones 1 y 3 para que el 3D quede alineado
-    RT_Image = app.config['RT']
-    RT_Image = RT_Image.transpose(2, 0, 1) # Formato NRRD: (X, Y, Z), cambiar para coincidir con DICOM
+    RT_Image = np.flip(app.config['RT'], axis=(0, 2)) # Voltear las posiciones 1 y 3 para que el 3D quede alineado
+    RT_Image = RT_Image.transpose(2, 0, 1) # Formato NRRD: (X, Y, Z), cambiar para coincidir con DICOM 
+    RT_2D = np.flip(app.config['RT'], axis=(0, 2))
+    app.config['RT_aligned'] = RT_2D
 
+    # Asignar los mismos origin y spacing del grid de DICOM para estar en el mismo espacio físico
     rt_grid = pv.ImageData()
     rt_grid.dimensions = np.array(RT_Image.shape) + 1
-    
-    # Asignar los mismos origin y spacing del grid de DICOM para estar en el mismo espacio físico
     rt_grid.origin = grid_dicom.origin
     rt_grid.spacing = grid_dicom.spacing
     
@@ -153,17 +163,128 @@ def add_RT_to_plotter():
     surface = rt_grid.contour([0.5])
 
     # Agregar la malla segmentada al plotter
-    plotter.add_mesh(surface, color="red", opacity=0.5, smooth_shading=True, specular=0.3)
-    plotter.render() # Actualizar el plotter
-    panel_vtk.object = plotter.ren_win # Actualizar el panel
-
-    def update_opacity(event):  # Actualizar la opacidad de la piel
+    mask_actor = plotter.add_mesh(surface, color="red", opacity=0.5, smooth_shading=True, specular=0.3)
+    
+    # Actualizar la opacidad de la piel
+    def update_opacity(event):  
         skin_actor.GetProperty().SetOpacity(event.new)
         panel_vtk.param.trigger('object')
-
     slider.param.watch(update_opacity, 'value')
-    
-    return pn.Column(panel_vtk, slider)
+
+    # Apagar y prender máscara
+    toggle_button = pn.widgets.Toggle(name='Mostrar/Ocultar máscara', button_type='danger', value=True)
+
+    def toggle_mask_visibility(event):
+        if event.new:
+            mask_actor.GetProperty().SetOpacity(0.5)
+        else:
+            mask_actor.GetProperty().SetOpacity(0.0)
+          
+    toggle_button.param.watch(toggle_mask_visibility, 'value')
+
+    # Actualizar el plotter y el panel
+    plotter.render() 
+    panel_vtk.object = plotter.ren_win
+    panel_column.append(toggle_button)
+
+    return panel_column
+
+
+def _extract_spacing_for_series(unique_id: str):
+    """Return (dx, dy, dz) in mm for the active series, robust dz via IPP if available."""
+    # Obtiene los archivos DICOM de la serie activa desde la configuración global
+    files = app.config['dicom_series'][unique_id]["ruta_archivos"]
+
+    dx = dy = dz = 1.0  # valores iniciales por defecto
+
+    # ---- Extraer dx y dy del primer archivo ----
+    try:
+        ds0 = pydicom.dcmread(files[0], stop_before_pixels=True, force=True)
+        ps = getattr(ds0, "PixelSpacing", [1.0, 1.0])  # PixelSpacing = [row_spacing, col_spacing]
+        dy = float(ps[0])  # tamaño del píxel en dirección Y (filas)
+        dx = float(ps[1])  # tamaño del píxel en dirección X (columnas)
+    except Exception:
+        pass  # si falla, se queda con los valores por defecto
+
+    # ---- Calcular dz usando ImagePositionPatient ----
+    zs = []
+    for p in files:
+        try:
+            ds = pydicom.dcmread(p, stop_before_pixels=True, force=True)
+            ipp = getattr(ds, "ImagePositionPatient", None)
+            if ipp is not None and len(ipp) >= 3:
+                zs.append(float(ipp[2]))  # coordenada Z
+        except Exception:
+            pass
+
+    if len(zs) >= 2:
+        zs_sorted = sorted(zs)
+        diffs = [abs(b - a) for a, b in zip(zs_sorted[:-1], zs_sorted[1:])]
+        if diffs:
+            dz = float(np.median(diffs))  # valor robusto de espaciado en Z
+    else:
+        # fallback: usar SliceThickness si está disponible
+        try:
+            dz = float(app.config['dicom_series'][unique_id].get("SliceThickness", 1.0))
+        except Exception:
+            dz = 1.0
+
+    # ---- Validaciones finales ----
+    for name, val in (("dx", dx), ("dy", dy), ("dz", dz)):
+        if not np.isfinite(val) or val <= 0:  # si no es válido, poner 1.0
+            if name == "dx": dx = 1.0
+            if name == "dy": dy = 1.0
+            if name == "dz": dz = 1.0
+    return dx, dy, dz
+
+
+def _compute_view_scales(dx, dy, dz):
+    """Return (scale_axial, scale_coronal, scale_sagittal)."""
+    eps = 1e-8  # para evitar divisiones por cero
+    scale_axial = max(eps, dy / dx)       # proporción entre píxeles Y y X (vista axial)
+    scale_coronal = max(eps, dz / dx)     # proporción entre Z y X (vista coronal)
+    scale_sagittal = max(eps, dz / dy)    # proporción entre Z y Y (vista sagital)
+    return scale_axial, scale_coronal, scale_sagittal
+
+
+def _slice_2d_and_target_size(view: str, index: int):
+    """
+    Usa app.config[...] para devolver (imagen 2D numpy, ancho_px, alto_px).
+    El ancho/alto se ajusta tomando en cuenta el spacing (proporción física).
+    """
+    vol = app.config.get("volume_raw")  # volumen 3D ya cargado
+    dims = app.config.get("dims")       # dimensiones del volumen (Z, Y, X)
+    if vol is None or dims is None:
+        return None, None, None
+
+    Z, Y, X = dims
+    v = view.lower()
+    if v == "sagital":   # alias heredado
+        v = "sagittal"
+
+    # ---- Vista axial ----
+    if v == "axial":
+        if not (0 <= index < Z): return None, None, None
+        img = vol[index, :, :]  # plano XY
+        w, h = X, int(round(Y * app.config["scale_axial"]))
+
+    # ---- Vista coronal ----
+    elif v == "coronal":
+        if not (0 <= index < Y): return None, None, None
+        img = vol[:, index, :]  # plano XZ
+        w, h = X, int(round(Z * app.config["scale_coronal"]))
+
+    # ---- Vista sagital ----
+    elif v == "sagittal":
+        if not (0 <= index < X): return None, None, None
+        img = vol[:, :, index]  # plano YZ
+        w, h = Y, int(round(Z * app.config["scale_sagittal"]))
+
+    else:
+        return None, None, None
+
+    # ancho y alto finales como enteros válidos (mínimo 1px)
+    return img, max(1, int(w)), max(1, int(h))
 
 
 # Iniciar el servidor Bokeh una sola vez al iniciar la aplicación
@@ -270,28 +391,43 @@ def process_dicom_folder(directory):
 
 @app.route('/process_selected_dicom', methods=['POST'])
 def process_selected_dicom():
-    data = request.json  # Recibir JSON del frontend
-    unique_id = data.get('unique_id')  # Obtener el ID seleccionado
+    data = request.json
+    unique_id = data.get('unique_id')
     app.config["unique_id"] = unique_id
 
     if not unique_id:
         return jsonify({"error": "No se recibió un ID válido"}), 400
 
-    print(f"Procesando DICOM con ID: {unique_id}")
+    # 3D volume (raw pixel values) assembled earlier in /loadDicomMetadata
+    volume_raw = app.config['dicom_series'][unique_id]["slices"]
+    if volume_raw is None or volume_raw.size == 0 or volume_raw.ndim != 3:
+        return jsonify({"error": "Serie inválida o sin slices 3D"}), 400
 
-    image = app.config['dicom_series'][unique_id]["slices"][:,:] #Obtener unicamente la imagen sin el instance number
-    #print(np.array(image).shape)
-        # Obtener los datos crudos de la imagen DICOM
-    #image = app.config['dicom_series'][unique_id]["slices"][:, :, 50]  # Tomar un corte medio
+    # One source of truth for rescale
+    slope = float(app.config['dicom_series'][unique_id].get("RescaleSlope", 1.0))
+    intercept = float(app.config['dicom_series'][unique_id].get("RescaleIntercept", 0.0))
 
-    # Ajuste de unidades Hounsfield (HU)
-    rescale_slope = app.config['dicom_series'][unique_id]['RescaleSlope']
-    rescale_intercept = app.config['dicom_series'][unique_id]['RescaleIntercept']
-    image_processed = image * rescale_slope + rescale_intercept
-    app.config["Image"] = image_processed.astype(np.int16) #Reducir el espacio ocupado con un dato de menor tamaño
-    global panel_vtk 
+    # Spacing + view scales
+    dx, dy, dz = _extract_spacing_for_series(unique_id)
+    s_ax, s_co, s_sa = _compute_view_scales(dx, dy, dz)
+
+    # Persist normalized state
+    app.config["volume_raw"] = volume_raw.astype(np.int16, copy=False)  # (Z, Y, X)
+    app.config["dims"] = app.config["volume_raw"].shape
+    app.config["slope"] = slope
+    app.config["intercept"] = intercept
+    app.config["dx"], app.config["dy"], app.config["dz"] = dx, dy, dz
+    app.config["scale_axial"] = s_ax
+    app.config["scale_coronal"] = s_co
+    app.config["scale_sagittal"] = s_sa
+    # Back-compat so old routes keep working:
+    app.config["Image"] = (app.config["volume_raw"].astype(np.float32) * app.config["slope"] + app.config["intercept"]).astype(np.int16)
+
+    # Clear 3D panel cache so it can be rebuilt for the selected series if needed
+    global panel_vtk
     panel_vtk = None
-    return jsonify({"mensaje": "Ok"})  # Respuesta JSON al frontend
+
+    return jsonify({"mensaje": "Ok"})
 
 ################################################################################################################
 
@@ -374,59 +510,88 @@ def exportar_dicom():
 
 @app.route("/render/<render>")
 def render(render):
-
     global panel_vtk
-    # Crear un nuevo cubo si no existe
-    if panel_vtk is None and app.config['Image'].any():
+    image = app.config.get('Image', None)
+
+    if image is None or image.size == 0:
+        return "❌ No hay imagen cargada o está vacía", 400
+
+    if image.ndim != 3:
+        return f"❌ Se esperaba una imagen 3D, pero se obtuvo una imagen con shape {image.shape}", 400
+
+    if panel_vtk is None:
         panel_vtk = create_render()
         start_bokeh_server(panel_vtk)
 
-    return render_template("render.html", success=(lambda: 0 if type(panel_vtk)==None else 1), render=render, max_value_axial=app.config['Image'].shape[0]-1 , max_value_sagital=app.config['Image'].shape[1]-1 , max_value_coronal=app.config['Image'].shape[2]-1)  # Tamaño fijo o dinámico
+    return render_template(
+        "render.html",
+        success=(0 if panel_vtk is None else 1),
+        render=render,
+        max_value_axial=image.shape[0] - 1,
+        max_value_sagital=image.shape[1] - 1,
+        max_value_coronal=image.shape[2] - 1
+    )
 
 
 @app.route('/image/<view>/<int:layer>')
 def get_image(view, layer):
-    image = app.config['Image']
-    unique_id = app.config["unique_id"]
+    # Obtener el volumen crudo (raw) y sus dimensiones desde la configuración global
+    vol = app.config.get("volume_raw")
+    dims = app.config.get("dims")
+    if vol is None or dims is None:
+        return "No hay volumen cargado", 400
 
-    # Aplicar Rescale Slope e Intercept
-    slope = app.config['dicom_series'][unique_id]["RescaleSlope"]
-    intercept = app.config['dicom_series'][unique_id]["RescaleIntercept"]
-    image = image * slope + intercept
+    # Alias de compatibilidad: si viene "sagital" lo mapeamos a "sagittal"
+    v = view.lower()
+    if v == "sagital":
+        v = "sagittal"
 
-    # Obtener el espaciado
-    slice_thickness = app.config['dicom_series'][unique_id]["SliceThickness"]
-    pixel_spacing = app.config['dicom_series'][unique_id]["PixelSpacing"]
+    # Obtener la imagen 2D de la vista solicitada y su tamaño en pixeles (ancho y alto)
+    img2d, w_px, h_px = _slice_2d_and_target_size(v, layer)
+    if img2d is None:
+        return "Vista o índice no válido", 400
 
-    if view == 'axial':
-        slice_img = image[layer, :, :]
-    elif view == 'sagital':
-        slice_img = image[:, layer, :]
-    elif view == 'coronal':
-        slice_img = image[:, :, layer]
-    else:
-        return "Vista no válida", 400
+    # Calcular Unidades Hounsfield (HU) al vuelo usando slope e intercept
+    slope = app.config.get("slope", 1.0)
+    intercept = app.config.get("intercept", 0.0)
+    hu2d = (img2d.astype(np.float32) * float(slope)) + float(intercept)
 
-    # Ajuste del espaciado a proporciones reales
-    if view == 'axial':
-        aspect_ratio = pixel_spacing[1] / pixel_spacing[0]
-    elif view == 'sagital':
-        aspect_ratio = slice_thickness / pixel_spacing[0]
-    elif view == 'coronal':
-        aspect_ratio = slice_thickness / pixel_spacing[1]
+    # Preparar la figura de matplotlib con el tamaño exacto en pixeles
+    dpi = 100.0
+    fig_w = w_px / dpi
+    fig_h = h_px / dpi
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi)
+    
+    # Mostrar la imagen en escala de grises
+    ax.imshow(hu2d, cmap="gray", interpolation="nearest", aspect='auto')
+    ax.axis("off")
+    plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    ax.set_position([0, 0, 1, 1])
 
-    # Ajustar y mostrar la imagen
-    plt.figure(figsize=(6, 6))
-    plt.imshow(slice_img, cmap='gray', aspect=aspect_ratio)
-    plt.axis('off')
+    # --- Overlay de RT (segmentación) ---
+    rt = app.config.get('RT_aligned')
+    if rt is not None:
+        try:
+            if v == 'axial':
+                seg_slice = np.flip(rt[:, :, layer], axis=0)
+            elif v == 'sagittal':
+                seg_slice = (rt[:, layer, :])
+            elif v == 'coronal':
+                seg_slice = np.flip(rt[layer, :, :], axis=0)
 
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
-    plt.close()
+            seg = (seg_slice > 1).T 
+            seg_masked = ma.masked_where(seg == 0, seg)
+
+            # Dibujar la máscara encima en color rojo, con transparencia
+            ax.imshow(seg_masked, cmap='Reds', alpha=0.8, interpolation="nearest", aspect='auto')
+        except Exception:
+            pass
+
+    buf = BytesIO()
+    FigureCanvas(fig).print_png(buf)
+    plt.close(fig)
     buf.seek(0)
     return send_file(buf, mimetype='image/png')
-
-
 
 
 def allowed_file(filename):
@@ -527,6 +692,68 @@ def loadDicom():
     except:
         pass
     return render_template('loadDicom.html')
+
+@app.route("/hu_value")
+def hu_value():
+    # Obtener el volumen y dimensiones desde la configuración global
+    vol = app.config.get("volume_raw")
+    dims = app.config.get("dims")
+    if vol is None or dims is None:
+        return jsonify({"error": "No hay volumen cargado"}), 500
+    
+    # Obtener el tipo de vista (axial, coronal, sagital) desde los parámetros de la URL
+    view = (request.args.get("view", "") or "").lower()
+    if view == "sagital":
+        view = "sagittal"
+
+    # Intentar leer coordenadas x, y e índice desde los parámetros de la URL
+    try:
+        x = int(request.args.get("x", "-1"))
+        y = int(request.args.get("y", "-1"))
+        index = int(request.args.get("index", "-1"))
+    except ValueError:
+        return jsonify({"error": "x, y, index deben ser enteros"}), 400
+
+    Z, Y, X = dims
+
+    # Factores de escala usados al renderizar cada vista (para mapear coordenadas de clic → voxel real)
+    s_ax = app.config["scale_axial"]
+    s_co = app.config["scale_coronal"]
+    s_sa = app.config["scale_sagittal"]
+
+    # Factores de escala usados al renderizar cada vista (para mapear coordenadas de clic → voxel real)
+    if view == "axial":
+        yy = int(round(y / max(1e-8, s_ax)))
+        xx = x
+        z = index
+    elif view == "coronal":
+        z = int(round(y / max(1e-8, s_co)))
+        xx = x
+        yy = index
+    elif view == "sagittal":
+        z = int(round(y / max(1e-8, s_sa)))
+        yy = x
+        xx = index
+    else:
+        return jsonify({"error": "Vista inválida"}), 400
+
+    if not (0 <= z < Z and 0 <= yy < Y and 0 <= xx < X):
+        return jsonify({"error": f"Coordenadas fuera de rango: (z,y,x)=({z},{yy},{xx})"}), 400
+
+    # Obtener el valor del voxel en esas coordenadas
+    pv = int(vol[z, yy, xx])
+
+    # Convertir a Unidades Hounsfield (HU) usando slope e intercept
+    hu = int(pv * float(app.config.get("slope", 1.0)) + float(app.config.get("intercept", 0.0)))
+    return jsonify({
+        "view": view,         # vista (axial, coronal o sagital)
+        "index": index,       # capa o corte
+        "png_click": {"x": x, "y": y},   # coordenadas originales del clic en el PNG
+        "voxel": {"z": z, "y": yy, "x": xx},  # coordenadas reales en el volumen 3D
+        "pixel_value": pv,    # valor original del píxel en el DICOM
+        "hu": hu              # valor convertido a Unidades Hounsfield
+    })
+
 
 # CODIGO - INICIO DE SESION
 # Formulario de inicio de sesión

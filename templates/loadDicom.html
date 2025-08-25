@@ -6,16 +6,30 @@
         <h1 style="color: var(--gris-claro);">Cargar archivos DICOM</h1>
         <form method="POST" enctype="multipart/form-data" class="mt-3">
             <div class="input-group">
-                <input type="file" name="folder"
-                    class="form-control bg-light text-dark border border-2 border-end-0 border-secondary shadow-sm"
+                <input type="file"  name="folder"
+                    class="form-control"
                     id="inputGroupFile04" aria-describedby="inputGroupFileAddon04"
                     aria-label="Upload" webkitdirectory directory multiple>
-                <button class="btn" type="submit" id="inputGroupFileAddon04"
-                    style="background-color: var(--gris-fuerte); color: var(--gris-claro); border: 2px solid var(--gris-fuerte);">
+                    <div id="archivoSeleccionado" class="mt-2"></div>
+                <button class="btn-secondary" type="submit" id="inputGroupFileAddon04">
                     <i class="bi bi-upload"></i> Subir y ordenar
                 </button>
             </div>    
         </form>
     </div>
 </div>
+<script>
+    const inputFile = document.querySelector('input[type="file"]');
+    const nombreArchivo = document.getElementById('archivoSeleccionado');
+
+    inputFile.addEventListener('change', () => {
+        if (inputFile.files.length > 0) {
+            const nombres = Array.from(inputFile.files).map(f => f.name);
+            nombreArchivo.textContent = `Archivos seleccionados: ${nombres.slice(0, 3).join(', ')}${nombres.length > 3 ? ' y más...' : ''}`;
+        } else {
+            nombreArchivo.textContent = '';
+        }
+    });
+</script>
+
 {% endblock %}
