@@ -1,101 +1,241 @@
- 
-  {% extends "home.html" %}
-
+{% extends "home.html" %}
 {% block content %}
-    <div class="container mt-4 text-center">
-        {% if success == 0 %}
-            <h1 class="text-light">Carga primero una imagen</h1>
-        {% else %}
-            <div class="card bg-dark text-light shadow-lg p-4 border-0 rounded-3">
-                <h1 class="mb-3">Visualización DICOM</h1>
-                <p class="lead">Renderizado de la imagen cargada.</p>
 
-                <!-- Contenedor del visor con mejor presentación -->
-                <div class="d-flex justify-content-center">
-                    <div class="border border-secondary rounded-3 shadow-lg p-3 bg-black">
-                        <iframe src="http://127.0.0.1:5010/panel" id="DicomRender" width="400" height="500"
-                            class="border-0 rounded-3">
-                        </iframe>
-                    </div>
-                </div>
+<style>
+  :root {
+    --gap: 8px;
+    --panel:#0f1218; --border:#262a33; --fg:#e7e7ea; --bg:#0a0c10;
+    --pad: 8px;            /* padding lateral/superior/inferior del visor */
+    --toolbar-h: 44px;     /* altura estimada de la barra (se recalcula por JS) */
+  }
 
-                <!-- Subir RT Struct (NRRD) -->
-                <div class="mt-4">
-                    <h2 class="text-light">Subir RT Struct (NRRD)</h2>
-                    <form action="/upload_RT" method="post" enctype="multipart/form-data" class="mt-3">
-                        <div class="input-group w-50 mx-auto">
-                            <input type="file" name="file" accept=".nrrd" class="form-control bg-secondary text-light border-0 shadow-sm">
-                            <button type="submit" class="btn btn-success"><i class="bi bi-upload"></i> Subir</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
+  /* Permitimos scroll solo si realmente no cabe todo */
+  html, body {
+    height: 100%;
+    overflow: auto;
+    background: var(--bg);
+    color: var(--fg);
+  }
 
-            <!-- Codigo para cargar visualizacion 2D en 3 planos -->
-            <div>
-                <h3>Vista Axial</h3>
-                <input type="range" id="slider_axial" min="0" max="{{ max_value_axial }}" step="1" value="{{max_value_axial//2}}" />
-                <input type="number" id="number_axial" min="0" max="{{ max_value_axial }}" step="1" value="{{max_value_axial//2}}" />
-                <img id="image_axial" src="/image/axial/0" alt="Vista Axial" width="500" />
-              </div>
-            
-              <div>
-                <h3>Vista Sagital</h3>
-                <input type="range" id="slider_sagital" min="0" max="{{ max_value_sagital }}" step="1" value="{{max_value_sagital//2}}" />
-                <input type="number" id="number_sagital" min="0" max="{{ max_value_sagital }}" step="1" value="{{max_value_sagital//2}}" />
-                <img id="image_sagital" src="/image/sagital/0" alt="Vista Sagital" width="500" />
-              </div>
-            
-              <div>
-                <h3>Vista Coronal</h3>
-                <input type="range" id="slider_coronal" min="0" max="{{ max_value_coronal }}" step="1" value="{{max_value_coronal//2}}" />
-                <input type="number" id="number_coronal" min="0" max="{{ max_value_coronal }}" step="1" value="{{max_value_coronal//2}}" />
-                <img id="image_coronal" src="/image/coronal/0" alt="Vista Coronal" width="500" />
-              </div>
-              
-              <script>
-                function setupSlider(view) {
-                  const slider = document.getElementById(`slider_${view}`);
-                  const number = document.getElementById(`number_${view}`);
-                  const image = document.getElementById(`image_${view}`);
-  
-                  function updateImage(layer) {
-                      image.src = `/image/${view}/${layer}?t=${new Date().getTime()}`;
-                  }
-  
-                  slider.addEventListener('input', () => {
-                      number.value = slider.value;
-                      updateImage(slider.value);
-                  });
-  
-                  number.addEventListener('input', () => {
-                      let val = Number(number.value);
-                      if (val < slider.min) val = slider.min;
-                      if (val > slider.max) val = slider.max;
-                      slider.value = val;
-                      updateImage(val);
-                  });
-                }
-            
-                setupSlider('axial');
-                setupSlider('sagital');
-                setupSlider('coronal');
-              </script>
-    
-        {% endif %}
+  /* Raíz del visor: barra + grid que ocupa el resto del alto visible */
+  #viewer-root {
+    min-height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: var(--gap);
+    padding: var(--pad);
+    box-sizing: border-box;
+  }
+
+  /* Barra superior compacta */
+  .toolbar {
+    display: flex; align-items: center; gap: 10px;
+    background: #11141b; border: 1px solid var(--border);
+    border-radius: 10px; padding: 6px 8px;
+  }
+
+  /* Altura del grid = ventana - barra - paddings - gap entre barra y grid */
+  .quad-grid {
+    height: calc(100vh - var(--toolbar-h) - (var(--pad) * 2) - var(--gap));
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows:
+      calc((100vh - var(--toolbar-h) - (var(--pad) * 2) - var(--gap)) / 2)
+      calc((100vh - var(--toolbar-h) - (var(--pad) * 2) - var(--gap)) / 2);
+    gap: var(--gap);
+    overflow: hidden; /* sin scroll interno del grid */
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;                 /* el contenido se ajusta al panel */
+    display: grid;
+    grid-template-rows: 1fr;          /* todo el panel es viewport */
+  }
+
+  /* Viewport: ocupa TODO el panel (sin forzar cuadrado para que quepa mejor) */
+  .vp-wrap {
+    position: relative;
+    width: 100%; height: 100%;
+    background: #000;
+  }
+
+  /* Si prefieres 3D cuadrado, descomenta:
+  #panel-3d .vp-wrap { aspect-ratio: 1 / 1; }
+  */
+
+  .vp-img, .vp-iframe {
+    width: 100%; height: 100%;
+    display: block; border: 0; background: #000; object-fit: contain;
+    transform: translateZ(0);
+  }
+  /* Deja pasar el click al contenedor aunque la imagen se recargue */
+  .vp-img { pointer-events: none; -webkit-user-drag: none; user-select: none; }
+
+  /* Crosshair verde */
+  .crosshair-x, .crosshair-y {
+    position: absolute; pointer-events: none; background: rgba(0,255,0,.85);
+  }
+  .crosshair-x { left: 0; width: 100%; height: 1px; top: 50%; }
+  .crosshair-y { top: 0; height: 100%; width: 1px; left: 50%; }
+
+  /* Sliders flotantes compactos */
+  .ctrl-float {
+    position: absolute; left: 6px; top: 6px; z-index: 5;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(10,12,16,.6); border: 1px solid rgba(255,255,255,.08);
+    padding: 4px 6px; border-radius: 8px; backdrop-filter: blur(4px);
+  }
+  .ctrl-float input[type="range"] { width: clamp(120px, 22vw, 280px); }
+  .ctrl-float input[type="number"] {
+    width: 70px; background: #0f1115; color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px;
+  }
+
+  /* Más compacto en pantallas bajitas */
+  @media (max-height: 700px) {
+    :root { --gap: 6px; --pad: 6px; }
+    .ctrl-float input[type="range"] { width: 150px; }
+  }
+</style>
+
+<div id="viewer-root">
+  {% if success == 0 %}
+    <div class="toolbar"><strong>Carga primero una imagen DICOM.</strong></div>
+    <div></div>
+  {% else %}
+
+    <!-- Barra superior: Subir RT (NRRD) -->
+    <div class="toolbar">
+      <form id="rt-form" action="/upload_RT" method="post" enctype="multipart/form-data" class="d-flex gap-2">
+        <input type="file" name="file" accept=".nrrd" class="form-control form-control-sm bg-secondary text-light border-0">
+        <button type="submit" class="btn btn-success btn-sm">Subir RT (NRRD)</button>
+      </form>
+      <div style="flex:1"></div>
     </div>
 
+    <!-- GRID 2×2 COMPACTO (mitades exactas de la altura disponible) -->
+    <div class="quad-grid" id="quad-grid">
+      <!-- AXIAL -->
+      <section class="panel" id="panel-ax">
+        <div class="vp-wrap" data-view="axial">
+          <div class="ctrl-float">
+            <input type="range" id="slider_axial" min="0" max="{{ max_value_axial }}" step="1" value="{{max_value_axial//2}}">
+            <input type="number" id="number_axial" min="0" max="{{ max_value_axial }}" step="1" value="{{max_value_axial//2}}">
+          </div>
+          <img id="image_axial" class="vp-img" src="/image/axial/{{max_value_axial//2}}" alt="Axial">
+          <div class="crosshair-x"></div><div class="crosshair-y"></div>
+        </div>
+      </section>
+
+      <!-- SAGITAL -->
+      <section class="panel" id="panel-sa">
+        <div class="vp-wrap" data-view="sagital">
+          <div class="ctrl-float">
+            <input type="range" id="slider_sagital" min="0" max="{{ max_value_sagital }}" step="1" value="{{max_value_sagital//2}}">
+            <input type="number" id="number_sagital" min="0" max="{{ max_value_sagital }}" step="1" value="{{max_value_sagital//2}}">
+          </div>
+          <img id="image_sagital" class="vp-img" src="/image/sagital/{{max_value_sagital//2}}" alt="Sagital">
+          <div class="crosshair-x"></div><div class="crosshair-y"></div>
+        </div>
+      </section>
+
+      <!-- 3D -->
+      <section class="panel" id="panel-3d">
+        <div class="vp-wrap">
+          <iframe class="vp-iframe" id="DicomRender" src="http://127.0.0.1:5010/panel" title="VTK 3D"></iframe>
+        </div>
+      </section>
+
+      <!-- CORONAL -->
+      <section class="panel" id="panel-co">
+        <div class="vp-wrap" data-view="coronal">
+          <div class="ctrl-float">
+            <input type="range" id="slider_coronal" min="0" max="{{ max_value_coronal }}" step="1" value="{{max_value_coronal//2}}">
+            <input type="number" id="number_coronal" min="0" max="{{ max_value_coronal }}" step="1" value="{{max_value_coronal//2}}">
+          </div>
+          <img id="image_coronal" class="vp-img" src="/image/coronal/{{max_value_coronal//2}}" alt="Coronal">
+          <div class="crosshair-x"></div><div class="crosshair-y"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== JS: lógica visor ===== -->
     <script>
-        document.querySelector("form").addEventListener("submit", function(event) {
-            event.preventDefault();  
-            let formData = new FormData(this);
+      // 1) Altura real de la barra → actualiza --toolbar-h para cálculo fino
+      function setToolbarHeightVar() {
+        const tb = document.querySelector('.toolbar');
+        const h = tb ? tb.getBoundingClientRect().height : 44;
+        document.documentElement.style.setProperty('--toolbar-h', `${h}px`);
+      }
+      window.addEventListener('load', setToolbarHeightVar);
+      window.addEventListener('resize', setToolbarHeightVar);
 
-            fetch("/upload_RT", {
-                method: "POST",
-                body: formData
-            });
+      // 2) Helpers de imagen 2D
+      function updateImage(view, layer) {
+        const img = document.getElementById(`image_${view}`);
+        img.src = `/image/${view}/${layer}?t=${Date.now()}`; // cache-buster
+        requestAnimationFrame(paintCrosshairs); // repinta tras cambio
+      }
 
-            alert("Archivo cargado correctamente.");
+      function setupSlider(view) {
+        const slider = document.getElementById(`slider_${view}`);
+        const number = document.getElementById(`number_${view}`);
+        function sync(val) {
+          const v = Math.max(+slider.min, Math.min(+slider.max, +val));
+          slider.value = v; number.value = v; updateImage(view, v);
+        }
+        slider.addEventListener('input', () => sync(slider.value));
+        number.addEventListener('input', () => sync(number.value));
+        sync(slider.value); // init
+      }
+      ['axial','sagital','coronal'].forEach(setupSlider);
+
+      // 3) Crosshair en verde (visual) + click robusto
+      const wraps = document.querySelectorAll('.vp-wrap[data-view]');
+      let crosshair = { x: .5, y: .5 };
+      function paintCrosshairs() {
+        wraps.forEach(w => {
+          const xLine = w.querySelector('.crosshair-y');
+          const yLine = w.querySelector('.crosshair-x');
+          if (xLine && yLine) {
+            xLine.style.left = (crosshair.x * 100) + '%';
+            yLine.style.top  = (crosshair.y * 100) + '%';
+          }
         });
+      }
+      paintCrosshairs();
+
+      function handleClick(e) {
+        const wrap = e.currentTarget.classList.contains('vp-img')
+          ? e.currentTarget.closest('.vp-wrap')
+          : e.currentTarget;
+
+        const r = wrap.getBoundingClientRect();
+        crosshair.x = (e.clientX - r.left) / r.width;
+        crosshair.y = (e.clientY - r.top)  / r.height;
+        paintCrosshairs();
+      }
+
+      wraps.forEach(w => {
+        w.addEventListener('click', handleClick, { passive: true });
+        const img = w.querySelector('.vp-img');
+        if (img) img.addEventListener('click', handleClick, { passive: true });
+      });
+
+      // 4) Subida de RT sin refrescar la página principal
+      const rtForm = document.getElementById('rt-form');
+      rtForm.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const fd = new FormData(rtForm);
+        await fetch('/upload_RT', { method:'POST', body: fd });
+        // Recargar SOLO el panel 3D para ver la segmentación
+        document.getElementById('DicomRender').contentWindow.location.reload();
+      });
     </script>
+
+  {% endif %}
+</div>
 {% endblock %}

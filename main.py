@@ -26,7 +26,8 @@ from dash import html, dcc, Input, Output, State
 import dash_vtk
 from dash_extensions.enrich import DashProxy, MultiplexerTransform
 
-os.chdir("c:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
+#os.chdir("c:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
+os.chdir("C:\\Users\\lozan\\OneDrive\\Escritorio\\Servicio-Web-APP-2025")
 
 app = Flask(__name__)
 app.secret_key = "clave_secreta_no_tan_secreta_jeje"
@@ -68,62 +69,117 @@ pn.extension('vtk')  # Activar la extensión VTK de Panel
 
 
 def create_render():
-    
-    global plotter, skin_actor, slider, grid_dicom
+    """
+    Genera la escena 3D (piel + hueso) con PyVista y retorna
+    un Panel (pn.Column) responsivo que contiene el canvas VTK + slider de opacidad.
+    """
 
-    volume_bone = ((app.config['Image'] > 175) * 1).astype(np.int16)
-    volume_skin = (((app.config['Image'] > -200) & (app.config['Image'] < 0)) * 1).astype(np.int16)
-    unique_id = app.config["unique_id"]
+    global plotter, skin_actor, slider, grid_dicom, panel_vtk
 
-    origin = app.config['dicom_series'][unique_id]["ImagePositionPatient"]
+    # Validaciones mínimas
+    if app.config.get('Image') is None or not app.config['Image'].size:
+        raise RuntimeError("No hay volumen cargado en app.config['Image'].")
+
+    if app.config.get('dicom_series') is None:
+        raise RuntimeError("No hay metadatos DICOM en app.config['dicom_series'].")
+
+    unique_id = app.config.get("unique_id")
+    if unique_id is None or unique_id not in app.config['dicom_series']:
+        raise RuntimeError("unique_id inválido o no establecido en app.config['unique_id'].")
+
+    # ========================
+    # 1) Preparación de volúmenes binarios (hueso/piel)
+    # ========================
+    # Volumen en HU (ya lo guardas entero en Image tras process_selected_dicom)
+    vol = app.config['Image'].astype(np.int16, copy=False)
+
+    # Umbrales sencillos (ajústalos a tu dataset)
+    volume_bone = (vol > 175).astype(np.int16)        # hueso
+    volume_skin = ((vol > -200) & (vol < 0)).astype(np.int16)  # piel
+
+    # ========================
+    # 2) Espacio físico (origen y spacing) desde la serie DICOM seleccionada
+    # ========================
+    ds_meta = app.config['dicom_series'][unique_id]
+    origin = ds_meta["ImagePositionPatient"]  # [x, y, z] de la primera slice
+    # Nota: Tu orden es (Z, Y, X) para vol, así que spacing debe seguir ese orden:
     spacing = (
-        app.config['dicom_series'][unique_id]["SliceThickness"],
-        app.config['dicom_series'][unique_id]["PixelSpacing"][0],
-        app.config['dicom_series'][unique_id]["PixelSpacing"][1],
+        float(ds_meta.get("SliceThickness", 1.0)),     # eje Z (índice 0)
+        float(ds_meta["PixelSpacing"][0]),             # eje Y (índice 1)
+        float(ds_meta["PixelSpacing"][1])              # eje X (índice 2)
     )
 
-    # --- HUESO GRID ---
-    grid_bone = pv.ImageData()
-    grid_bone.dimensions = np.array(volume_bone.shape) + 1
-    grid_bone.origin = origin
-    grid_bone.spacing = spacing
-    grid_bone.cell_data["values"] = volume_bone.flatten(order="F")
-    grid_bone = grid_bone.cell_data_to_point_data()
-    surface_bone = grid_bone.contour([0.5])
+    # ========================
+    # 3) Construcción de grids y superficies (isosuperficies)
+    # ========================
+    def make_surface(binary_volume):
+        grid = pv.ImageData()
+        # IMPORTANTE: PyVista/VTK esperan dimensiones +1
+        grid.dimensions = np.array(binary_volume.shape) + 1  # (nz, ny, nx) + 1
+        grid.origin = origin
+        grid.spacing = spacing
+        # Los valores van como celdas; usar orden Fortran para mantener ejes
+        grid.cell_data["values"] = binary_volume.flatten(order="F")
+        grid = grid.cell_data_to_point_data()
+        surf = grid.contour([0.5])  # isosuperficie de la binaria
+        return grid, surf
 
-    # --- PIEL GRID ---
-    grid_skin = pv.ImageData()
-    grid_skin.dimensions = np.array(volume_skin.shape) + 1
-    grid_skin.origin = origin
-    grid_skin.spacing = spacing
-    grid_skin.cell_data["values"] = volume_skin.flatten(order="F")
-    grid_skin = grid_skin.cell_data_to_point_data()
-    surface_skin = grid_skin.contour([0.5])
-    
-    # Para usarse después y plotear segmentaciones
+    grid_bone, surface_bone = make_surface(volume_bone)
+    grid_skin, surface_skin = make_surface(volume_skin)
+
+    # Guardar grid_skin como referencia para segmentaciones (RT) posteriores
     grid_dicom = grid_skin
-    
-    # --- PLOTTING ---
+
+    # ========================
+    # 4) Render con PyVista
+    # ========================
     plotter = pv.Plotter(off_screen=True)
     plotter.set_background("black")
-    plotter.add_mesh(surface_bone, color="white", smooth_shading=True, ambient=0.3, specular=0.4, specular_power=10)
-    skin_actor = plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, name="skin", smooth_shading=True)  # Piel transparente
+
+    # Hueso (blanco brillante)
+    plotter.add_mesh(
+        surface_bone,
+        color="white",
+        smooth_shading=True,
+        ambient=0.3,
+        specular=0.4,
+        specular_power=10,
+    )
+    # Piel (semi-transparente)
+    skin_actor = plotter.add_mesh(
+        surface_skin,
+        color="peachpuff",
+        opacity=0.5,
+        name="skin",
+        smooth_shading=True,
+    )
 
     plotter.view_isometric()
     plotter.show_axes()
 
-    panel_vtk = pn.pane.VTK(plotter.ren_win, width=400, height=500)
+    # ========================
+    # 5) Panel VTK responsivo + slider
+    # ========================
+    # ✅ Pane VTK sin medidas fijas: se estira con el contenedor (iframe)
+    panel_vtk = pn.pane.VTK(plotter.ren_win, sizing_mode="stretch_both")
 
-    # --- SLIDER + CALLBACK ---
-    slider = pn.widgets.FloatSlider(name="Opacidad de la piel", start=0.0, end=1.0, step=0.05, value=0.5)
+    slider = pn.widgets.FloatSlider(
+        name="Opacidad de la piel",
+        start=0.0, end=1.0, step=0.05, value=0.5
+    )
 
-    def update_opacity(event):  # Actualizar la opacidad de la piel
-        skin_actor.GetProperty().SetOpacity(event.new)
-        panel_vtk.param.trigger('object')
+    def update_opacity(event):
+        try:
+            skin_actor.GetProperty().SetOpacity(float(event.new))
+            # Forzar actualización del pane
+            panel_vtk.param.trigger('object')
+        except Exception:
+            pass
 
     slider.param.watch(update_opacity, 'value')
 
-    return pn.Column(panel_vtk, slider)
+    # ✅ Contenedor responsivo
+    return pn.Column(panel_vtk, slider, sizing_mode="stretch_both")
 
 
 def add_RT_to_plotter():
@@ -372,61 +428,159 @@ def exportar_dicom():
     # Enviar el archivo ZIP al cliente
     return send_file(zip_path, as_attachment=True, download_name='archivos_anonimizados.zip')
 
+################################################################################################################
+# Rutas principales de la aplicación
 @app.route("/render/<render>")
 def render(render):
-
+    import numpy as np
     global panel_vtk
-    # Crear un nuevo cubo si no existe
-    if panel_vtk is None and app.config['Image'].any():
+
+    vol = app.config.get('Image')
+
+    # Si no hay volumen o está vacío → muestra mensaje y no calcule sliders
+    if vol is None or not getattr(vol, "size", 0):
+        # Intenta recuperar desde dicom_series si ya cargaste metadatos/slices
+        uid = app.config.get("unique_id")
+        ds = app.config.get("dicom_series")
+        if uid and ds and isinstance(ds.get(uid, {}).get("slices", None), np.ndarray):
+            vol = ds[uid]["slices"]
+            # Aplica HU solo si NO lo habías hecho ya
+            slope = float(ds[uid].get("RescaleSlope", 1.0))
+            intercept = float(ds[uid].get("RescaleIntercept", 0.0))
+            vol = vol.astype(np.float32) * slope + intercept
+            app.config["Image"] = vol.astype(np.int16)
+
+    # Si sigue sin haber volumen, renderiza la plantilla en modo "sin imagen"
+    if vol is None or not getattr(vol, "size", 0):
+        return render_template("render.html", success=0)
+
+    # Asegura que sea un arreglo numpy
+    vol = np.asarray(app.config["Image"])
+    # Si es 2D (un solo corte), conviértelo en 3D con Z=1
+    if vol.ndim == 2:
+        vol = vol[np.newaxis, ...]           # (1, rows, cols)
+        app.config["Image"] = vol            # guarda la versión 3D
+    elif vol.ndim != 3:
+        # Cualquier otra cosa no soportada → muestra modo sin imagen
+        return render_template("render.html", success=0)
+
+    nz, ny, nx = vol.shape
+
+    # Levanta Panel/VTK si hace falta y hay datos
+    if panel_vtk is None and nz > 0 and ny > 0 and nx > 0:
         panel_vtk = create_render()
         start_bokeh_server(panel_vtk)
 
-    return render_template("render.html", success=(lambda: 0 if type(panel_vtk)==None else 1), render=render, max_value_axial=app.config['Image'].shape[0]-1 , max_value_sagital=app.config['Image'].shape[1]-1 , max_value_coronal=app.config['Image'].shape[2]-1)  # Tamaño fijo o dinámico
+    return render_template(
+        "render.html",
+        success=1,
+        render=render,
+        max_value_axial=max(nz - 1, 0),
+        max_value_sagital=max(ny - 1, 0),
+        max_value_coronal=max(nx - 1, 0),
+    )
 
-
+"""
 @app.route('/image/<view>/<int:layer>')
 def get_image(view, layer):
-    image = app.config['Image']
-    unique_id = app.config["unique_id"]
+    import numpy as np
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import io
 
-    # Aplicar Rescale Slope e Intercept
-    slope = app.config['dicom_series'][unique_id]["RescaleSlope"]
-    intercept = app.config['dicom_series'][unique_id]["RescaleIntercept"]
-    image = image * slope + intercept
+    vol = app.config.get('Image')
+    if vol is None or not getattr(vol, "size", 0):
+        return "No hay volumen cargado", 400
 
-    # Obtener el espaciado
-    slice_thickness = app.config['dicom_series'][unique_id]["SliceThickness"]
-    pixel_spacing = app.config['dicom_series'][unique_id]["PixelSpacing"]
+    unique_id = app.config.get("unique_id")
+    meta = app.config['dicom_series'][unique_id]
 
+    # Espaciados físicos
+    slice_thickness = float(meta.get("SliceThickness", 1.0))
+    ps = meta.get("PixelSpacing", [1.0, 1.0])
+    row_spacing = float(ps[0])  # Y
+    col_spacing = float(ps[1])  # X
+
+    vol = np.asarray(vol)
+    if vol.ndim == 2:
+        vol = vol[np.newaxis, ...]  # (Z=1, Y, X)
+
+    nz, ny, nx = vol.shape  # (Z, Y, X)
+
+    # Selección de corte y extents físicos (xmin, xmax, ymin, ymax)
     if view == 'axial':
-        slice_img = image[layer, :, :]
+        layer = 0 if nz == 1 else max(0, min(layer, nz - 1))
+        img = vol[layer, :, :]
+        extent = [0, nx * col_spacing, 0, ny * row_spacing]  # X·dx, Y·dy
     elif view == 'sagital':
-        slice_img = image[:, layer, :]
+        layer = max(0, min(layer, ny - 1))
+        img = vol[:, layer, :]  # (Z, X)
+        extent = [0, nx * col_spacing, 0, nz * slice_thickness]  # X·dx, Z·dz
     elif view == 'coronal':
-        slice_img = image[:, :, layer]
+        layer = max(0, min(layer, nx - 1))
+        img = vol[:, :, layer]  # (Z, Y)
+        extent = [0, ny * row_spacing, 0, nz * slice_thickness]  # Y·dy, Z·dz
     else:
         return "Vista no válida", 400
 
-    # Ajuste del espaciado a proporciones reales
-    if view == 'axial':
-        aspect_ratio = pixel_spacing[1] / pixel_spacing[0]
-    elif view == 'sagital':
-        aspect_ratio = slice_thickness / pixel_spacing[0]
-    elif view == 'coronal':
-        aspect_ratio = slice_thickness / pixel_spacing[1]
-
-    # Ajustar y mostrar la imagen
-    plt.figure(figsize=(6, 6))
-    plt.imshow(slice_img, cmap='gray', aspect=aspect_ratio)
-    plt.axis('off')
+    img = img.astype(np.float32)
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.imshow(img, cmap='gray', origin='lower', extent=extent)  # <- extents físicos
+    ax.set_aspect('equal')                                      # <- pixels cuadrados en espacio físico
+    ax.axis('off')
+    fig.subplots_adjust(0, 0, 1, 1)                             # <- sin márgenes
 
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
-    plt.close()
+    fig.savefig(buf, format='png', dpi=100)  # <- sin bbox_inches='tight'
+    plt.close(fig)
+    buf.seek(0)
+    return send_file(buf, mimetype='image/png')"""
+    
+@app.route('/image/<view>/<int:layer>')
+def get_image(view, layer):
+    import numpy as np
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import io
+
+    vol = app.config.get('Image')
+    if vol is None or not getattr(vol, "size", 0):
+        return "No hay volumen cargado", 400
+
+    vol = np.asarray(vol)
+    if vol.ndim == 2:
+        vol = vol[np.newaxis, ...]  # (1, Y, X)
+
+    nz, ny, nx = vol.shape  # (Z, Y, X)
+
+    # Selección del corte
+    if view == 'axial':
+        layer = max(0, min(layer, nz - 1))
+        img = vol[layer, :, :]
+    elif view == 'sagital':
+        layer = max(0, min(layer, ny - 1))
+        img = vol[:, layer, :]
+    elif view == 'coronal':
+        layer = max(0, min(layer, nx - 1))
+        img = vol[:, :, layer]
+    else:
+        return "Vista no válida", 400
+
+    img = img.astype(np.float32)
+
+    # Render: usamos imshow directo, sin extent y sin márgenes
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.imshow(img, cmap='gray', origin='lower', aspect='auto')
+    ax.axis('off')
+    fig.subplots_adjust(0, 0, 1, 1)  # ocupa todo el canvas
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight', pad_inches=0)
+    plt.close(fig)
     buf.seek(0)
     return send_file(buf, mimetype='image/png')
-
-
 
 
 def allowed_file(filename):
