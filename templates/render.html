@@ -13,6 +13,8 @@
       <div class="col-md-2 bg-dark d-flex align-items-start justify-content-start flex-column p-3 border-end border-secondary" style="min-height: 100vh;">
         <h5 class="text-light mb-3">Subir RT Struct</h5>
         <form action="/upload_RT" method="post" enctype="multipart/form-data" class="d-flex flex-column gap-2 w-100">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
           <input type="file" name="file" accept=".nrrd" class="form-control bg-secondary text-light border-0 shadow-sm" required>
           <button type="submit" class="btn btn-success shadow-sm w-100">
             <i class="bi bi-upload"></i> Subir
@@ -269,8 +271,10 @@
         event.preventDefault();
         let formData = new FormData(this);
 
+        const token = document.querySelector('meta[name="csrf-token"]').content;
         fetch("/upload_RT", {
           method: "POST",
+          headers: { 'X-CSRFToken': token },
           body: formData
         }).then(() => {
           alert("Archivo cargado correctamente.");

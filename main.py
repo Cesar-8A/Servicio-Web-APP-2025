@@ -2,6 +2,8 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, s
 from flask import session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_wtf import FlaskForm
+from flask_wtf import CSRFProtect
+from flask_wtf.csrf import generate_csrf
 from wtforms import StringField, PasswordField, SubmitField
 from wtforms.validators import InputRequired, Length, EqualTo
 
@@ -30,13 +32,22 @@ from io import BytesIO
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 
-os.chdir("C:/Users/Usuario/OneDrive/flask")
+#os.chdir("C:/Users/Usuario/OneDrive/flask")
 
 #os.chdir("c:\\Users\\jesus\\Desktop\\Cucei\\SERVICIO\\Servicio-Web-APP-2025")
 #os.chdir("C:/Users/lozan/Downloads/Servicio-Web-APP-2025-branchChuy")
 
 app = Flask(__name__)
-app.secret_key = "clave_secreta_no_tan_secreta_jeje"
+
+# 1) SECRET KEY primero
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(24))
+
+# 2) Config de CSRF
+app.config['WTF_CSRF_ENABLED'] = True
+app.config['WTF_CSRF_SECRET_KEY'] = os.environ.get("WTF_CSRF_SECRET_KEY", app.secret_key)
+
+# 3) Inicializar CSRF
+csrf = CSRFProtect(app)
 
 # Inyección global de estado de sesión a todas las plantillas
 @app.context_processor
@@ -45,6 +56,13 @@ def inject_user():
         'user_logged_in': session.get('user_logged_in', False),
         'user_initials': session.get('user_initials', '')
     }
+    
+from flask_wtf.csrf import generate_csrf  # ya lo importaste arriba
+
+@app.context_processor
+def inject_csrf_token():
+    return dict(csrf_token=generate_csrf)
+
 
 #Variables globales
 panel_vtk = None
@@ -433,14 +451,19 @@ def process_selected_dicom():
 
 @app.route('/anonimize')
 def anonimize():
-    if type(app.config['dicom_series'])!=type(None):
+    if type(app.config['dicom_series']) != type(None):
         success = 1
         unique_id = app.config['unique_id']
         dicom_series = app.config['dicom_series'][unique_id]['Anonimize']
+        return render_template('anonimize.html',
+                               dicom_series=dicom_series,
+                               success=success,
+                               unique_id=unique_id)  # <-- PASAR unique_id
     else:
         success = 0
-        dicom_series = None
-    return render_template('anonimize.html', dicom_series=dicom_series, success = success)
+        return render_template('anonimize.html', dicom_series=None, success=success)
+
+
 
 @app.route('/guardar_cambios', methods=['POST'])
 def guardar_cambios():
@@ -489,24 +512,39 @@ def exportar_dicom():
             nombreAnonimizado = f"anonimo_{nombreArchivo}"  # Concatenar "anonimo_" al nombre
             rutaDestino = os.path.join(ANONIMIZADO_FOLDER, nombreAnonimizado)
 
-            # Guardar el archivo anonimizado en la carpeta "anonimizado"
-            dicom_data.save_as(rutaDestino)
-
         except Exception as e:
             print(f"Error al procesar el archivo {archivo}: {e}")
             continue
 
-    # Crear un archivo ZIP con los archivos anonimizados
-    zip_path = os.path.join(ANONIMIZADO_FOLDER, 'archivos_anonimizados.zip')
-    with zipfile.ZipFile(zip_path, 'w') as zipf:
-        for root, _, files in os.walk(ANONIMIZADO_FOLDER):
-            for file in files:
-                if file.endswith('.dcm'):  # Solo incluir archivos DICOM
-                    file_path = os.path.join(root, file)
-                    zipf.write(file_path, os.path.basename(file_path))
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_dir = os.path.join(tmpdir, "anon")
+        os.makedirs(out_dir, exist_ok=True)
 
-    # Enviar el archivo ZIP al cliente
+        # Guardar SOLO los archivos anonimizados de esta exportación
+        for archivo in archivosDicom:
+            try:
+                dicom_data = pydicom.dcmread(archivo)
+                for campo, valor in app.config['dicom_series'][unique_id]['Anonimize'].items():
+                    if campo in dicom_data:
+                        try:
+                            dicom_data[campo].value = str(valor)
+                        except:
+                            dicom_data[campo].value = 0
+                nombreArchivo = os.path.basename(archivo)
+                dicom_data.save_as(os.path.join(out_dir, f"anonimo_{nombreArchivo}"))
+            except Exception as e:
+                print(f"Error al procesar el archivo {archivo}: {e}")
+                continue
+
+    # Comprimir solo esta tanda
+    zip_path = os.path.join(tmpdir, 'archivos_anonimizados.zip')
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        for f in os.listdir(out_dir):
+            if f.lower().endswith(".dcm"):
+                zipf.write(os.path.join(out_dir, f), f)
+
     return send_file(zip_path, as_attachment=True, download_name='archivos_anonimizados.zip')
+
 
 @app.route("/render/<render>")
 def render(render):
@@ -783,13 +821,14 @@ def login():
         user = form.username.data
         password = form.password.data
 
-        if user in usuarios and usuarios[user] == password:
+        if user in usuarios and check_password_hash(usuarios[user], password):
             session['user_logged_in'] = True
             session['user_initials'] = user[:2].upper()
             flash('Inicio de sesión exitoso', 'success')
             return redirect(url_for('home'))
         else:
             flash('Usuario o contraseña incorrectos', 'danger')
+
     return render_template('login.html', form=form)
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -802,9 +841,10 @@ def register():
         if user in usuarios:
             flash('El usuario ya existe', 'danger')
         else:
-            usuarios[user] = password
+            usuarios[user] = generate_password_hash(password)
             flash('Registro exitoso. Ahora puedes iniciar sesión.', 'success')
             return redirect(url_for('login'))
+
     return render_template('register.html', form=form)
 
 @app.route('/logout')
