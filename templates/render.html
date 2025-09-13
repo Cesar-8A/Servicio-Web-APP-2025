@@ -1,287 +1,177 @@
 {% extends "home.html" %}
 
+{% block main_container %}
 {% block content %}
-<div class="container-fluid p-0 m-0">
-  {% if success == 0 %}
-    <div class="text-center mt-5">
-      <h1 class="text-light">Carga primero una imagen</h1>
-    </div>
-  {% else %}
 
-    <div class="row g-0">
-      <!-- Sidebar izquierda con botón RT Struct -->
-      <div class="col-md-2 bg-dark d-flex align-items-start justify-content-start flex-column p-3 border-end border-secondary" style="min-height: 100vh;">
-        <h5 class="text-light mb-3">Subir RT Struct</h5>
-        <form action="/upload_RT" method="post" enctype="multipart/form-data" class="d-flex flex-column gap-2 w-100">
+<div id="viewer-wrapper">
+  <div id="viewer-container">
+
+    <div id="plugins-sidebar" class="bg-dark d-flex flex-column p-3 border-end border-secondary">
+      <h5 class="text-light mb-3">Plugins</h5>
+      
+      <button id="rtStructPluginBtn" class="btn btn-secondary w-100 mb-2">
+        Cargar RT Struct
+      </button>
+      <div id="rtStructPluginContainer" class="w-100 mb-3" style="display: none;">
+        <form id="rtStructForm" action="/upload_RT" method="post" enctype="multipart/form-data" class="d-flex flex-column gap-2 w-100 mt-2">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-          <input type="file" name="file" accept=".nrrd" class="form-control bg-secondary text-light border-0 shadow-sm" required>
-          <button type="submit" class="btn btn-success shadow-sm w-100">
-            <i class="bi bi-upload"></i> Subir
-          </button>
+          <input type="file" name="file" accept=".nrrd" class="form-control" required>
+          <button type="submit" class="btn btn-udg-dorado shadow-sm w-100"><i class="bi bi-upload"></i> Subir</button>
         </form>
-
-        <!-- NUEVO: Herramientas (HU Picker) -->
-        <hr class="text-secondary w-100 my-3">
-        <h5 class="text-light mb-2">Herramientas</h5>
-        <button id="huToggle" class="btn btn-outline-info w-100 mb-2">
-          Activar Selector HU
-        </button>
-        <small id="huInfo" class="text-secondary"></small>
-        <div id="huResult" class="small text-warning mt-2"></div>
+      </div>
+      
+      <button id="huPickerPluginBtn" class="btn btn-secondary w-100 mb-2">
+        Selector HU
+      </button>
+      <div id="huPickerPluginContainer" class="w-100 mb-3" style="display: none;">
+        <small id="huInfo" class="text-secondary d-block mt-2"></small>
+        <div id="huResult" class="small text-warning mt-1"></div>
       </div>
 
-      <!-- Área de cuadrantes -->
-      <div class="col-md-10 p-3">
-        <div class="row g-3" style="height: 90vh; min-height: 600px;">
-          {% set views = [
-            ('axial', max_value_axial),
-            ('sagital', max_value_sagital),
-            ('coronal', max_value_coronal),
-            ('3D', None)
-          ] %}
+      <button id="huToggle" style="display: none;">Activar Selector HU</button>
+    </div>
+
+    <div id="quadrant-grid-wrapper">
+      {% if success == 0 %}
+        <div class="d-flex h-100 align-items-center justify-content-center">
+          <h1 class="text-light">Carga primero una imagen</h1>
+        </div>
+      {% else %}
+        <div id="quadrant-grid">
+          {% set views = [('axial', max_value_axial), ('sagital', max_value_sagital), ('coronal', max_value_coronal), ('3D', None)] %}
           {% for view, max_val in views %}
-          <div class="col-md-6 d-flex flex-column">
-            <div id="card_{{ view }}" class="card bg-dark text-light flex-fill border-0 shadow position-relative">
-              <div class="card-body d-flex flex-column">
-
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <h5 class="card-title mb-0">Vista {{ view|upper }}</h5>
-                  <button type="button" class="btn btn-sm btn-outline-light" onclick="toggleFullscreen('card_{{ view }}')">
-                    <i class="bi bi-arrows-fullscreen"></i>
-                  </button>
+            <div id="card_{{ view }}" class="card bg-dark text-light border-secondary shadow-sm quadrant-card">
+              <div class="card-body p-2">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <h6 class="card-title mb-0 ms-2">Vista {{ view|upper }}</h6>
+                  <button type="button" class="btn btn-sm btn-outline-light" onclick="toggleFullscreen('card_{{ view }}')"><i class="bi bi-arrows-fullscreen"></i></button>
                 </div>
-
                 {% if view != '3D' %}
-                <div class="d-flex gap-2 align-items-center">
+                <div class="d-flex gap-2 align-items-center px-2">
                   <input type="range" id="slider_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-range">
-                  <input type="number" id="number_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-control form-control-sm w-25">
+                  <input type="number" id="number_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-control form-control-sm" style="width: 70px;">
                 </div>
-
-                <!-- NUEVO: overlay canvas por vista 2D -->
-                <div class="image-wrapper mt-3 position-relative">
-                  <img id="image_{{ view }}" src="/image/{{ view }}/0" class="rounded w-100 h-auto d-block" alt="{{ view }}" />
-                  <canvas id="overlay_{{ view }}" class="position-absolute top-0 start-0" style="pointer-events:none;"></canvas>
+                <div class="image-wrapper mt-1">
+                  <img id="image_{{ view }}" src="/image/{{ view }}/{{ max_val // 2 }}" class="rounded" alt="{{ view }}" />
+                  <canvas id="overlay_{{ view }}" style="pointer-events:none;"></canvas>
                 </div>
-
                 {% else %}
-                <div class="iframe-wrapper mt-3">
-                  <iframe
-                    src="http://127.0.0.1:5010/panel"
-                    id="DicomRender"
-                    class="rounded border-0"
-                    allowfullscreen
-                  ></iframe>
+                <div class="iframe-wrapper mt-1">
+                  <iframe src="http://127.0.0.1:5010/panel" id="DicomRender" class="rounded" allowfullscreen></iframe>
                 </div>
                 {% endif %}
-
               </div>
             </div>
-          </div>
           {% endfor %}
         </div>
-      </div>
+      {% endif %}
     </div>
+  </div>
+</div>
 
-    <!-- JS sliders (sin cambios funcionales) -->
-    <script>
-      function setupSlider(view) {
-        const slider = document.getElementById(`slider_${view}`);
-        const number = document.getElementById(`number_${view}`);
-        const image = document.getElementById(`image_${view}`);
+<script>
+// --- SE AÑADE EL EVENT LISTENER PARA ESPERAR A QUE CARGUE EL DOCUMENTO ---
+document.addEventListener('DOMContentLoaded', function() {
 
-        function updateImage(layer) {
-          image.src = `/image/${view}/${layer}?t=${new Date().getTime()}`;
-        }
+  // --- LÓGICA DE PLUGINS Y HU PICKER ---
+  function setupPluginButton(btnId, containerId, onToggleCallback) {
+    const btn = document.getElementById(btnId);
+    const container = document.getElementById(containerId);
+    let isActive = false;
+    btn.addEventListener('click', () => {
+      isActive = !isActive;
+      btn.classList.toggle('btn-secondary', !isActive);
+      btn.classList.toggle('btn-udg-rojo', isActive);
+      container.style.display = isActive ? 'block' : 'none';
+      if (onToggleCallback) { onToggleCallback(isActive); }
+    });
+  }
+  setupPluginButton('rtStructPluginBtn', 'rtStructPluginContainer');
+  const huToggle_hiddenButton = document.getElementById('huToggle');
+  setupPluginButton('huPickerPluginBtn', 'huPickerPluginContainer', () => {
+    huToggle_hiddenButton.click();
+  });
 
-        slider.addEventListener('input', () => {
-          number.value = slider.value;
-          updateImage(slider.value);
-        });
+  const huInfo = document.getElementById("huInfo");
+  const huResult = document.getElementById("huResult");
+  let huMode = false;
 
-        number.addEventListener('input', () => {
-          let val = Number(number.value);
-          if (val < slider.min) val = slider.min;
-          if (val > slider.max) val = slider.max;
-          slider.value = val;
-          updateImage(val);
-        });
-
-        document.addEventListener('fullscreenchange', () => {
-          if (!document.fullscreenElement) {
-            document.querySelector('.fullscreen')?.classList.remove('fullscreen');
-          }
-        });
-      }
-
-      setupSlider('axial');
-      setupSlider('sagital');
-      setupSlider('coronal');
-    </script>
-
-    <!-- JS HU picker  -->
-    <script>
-      // --- Estado del HU picker ---
-      const huToggle = document.getElementById("huToggle");   // Botón para activar/desactivar el modo HU
-      const huInfo   = document.getElementById("huInfo");     // Texto de instrucciones debajo del botón
-      const huResult = document.getElementById("huResult");   // Texto donde se muestra el resultado (valor HU)
-      let huMode = false;                                     // Estado actual: activado/desactivado
-
-      // --- Función utilitaria: ajusta el canvas al tamaño en pantalla del <img> (considerando DPR) ---
-      function syncCanvasToImage(imgEl, canvasEl) {
-        const dpr = window.devicePixelRatio || 1;             // DPI del dispositivo (para pantallas retina)
-        const rect = imgEl.getBoundingClientRect();           // Dimensiones del <img> en CSS
-        canvasEl.width  = Math.max(1, Math.round(rect.width  * dpr));
-        canvasEl.height = Math.max(1, Math.round(rect.height * dpr));
-        canvasEl.style.width  = rect.width + "px";            // Tamaño en CSS
-        canvasEl.style.height = rect.height + "px";
-        const ctx = canvasEl.getContext("2d");
-        ctx.setTransform(1,0,0,1,0,0);                        // Reset de transformaciones
-        ctx.scale(dpr, dpr);                                  // Escalado según DPI
-        return ctx;
-      }
-
-      // --- Dibuja un marcador (círculo rojo) en el canvas ---
-      function drawMarker(ctx, xCss, yCss) {
-        ctx.fillStyle = "red";
-        ctx.beginPath();
-        ctx.arc(xCss, yCss, 5, 0, 2*Math.PI);
-        ctx.fill();
-      }
-
-      // --- Convierte coordenadas CSS de un click en coordenadas de píxel de la imagen PNG ---
-      function cssToPngPixels(imgEl, evt) {
-        const rect = imgEl.getBoundingClientRect();
-        const nW = imgEl.naturalWidth;   // ancho original de la imagen en píxeles
-        const nH = imgEl.naturalHeight;  // alto original de la imagen en píxeles
-
-        const dispW = rect.width;        // ancho mostrado en pantalla
-        const dispH = rect.height;       // alto mostrado en pantalla
-
-        // Escalas de conversión entre CSS y píxeles reales
-        const scaleX = dispW / nW;
-        const scaleY = dispH / nH;
-
-        // Coordenadas del click relativas al <img>
-        const xCss = evt.clientX - rect.left;
-        const yCss = evt.clientY - rect.top;
-
-        // Si el click quedó fuera de la imagen, cancelar
-        if (xCss < 0 || yCss < 0 || xCss > dispW || yCss > dispH) return null;
-
-        // Convertir a coordenadas de píxel en la imagen original
-        const xPix = Math.floor(xCss / scaleX);
-        const yPix = Math.floor(yCss / scaleY);
-        return { xPix, yPix, xCss, yCss };
-      }
-
-      // --- Asigna la lógica HU picker a una vista específica (axial, sagital, coronal) ---
-      function bindHU(view) {
-        const img   = document.getElementById(`image_${view}`);   // Imagen base
-        const canvas = document.getElementById(`overlay_${view}`);// Canvas overlay encima
-        let ctx = null;
-
-        // Resetea el canvas cuando cambia el tamaño o la imagen
-        function resetCanvas() {
-          ctx = syncCanvasToImage(img, canvas);
-          ctx.clearRect(0,0,canvas.width, canvas.height);
-        }
-
-        img.addEventListener("load", resetCanvas);
-        if (img.complete) { resetCanvas(); } // Si ya está cargada, lo hace de inmediato
-
-        // Evento click en la imagen
-        img.addEventListener("click", (evt) => {
-          if (!huMode) return;  // Si no está en modo HU, no hacer nada
-
-          const mapped = cssToPngPixels(img, evt);  // Convertir click a píxeles
-          if (!mapped) {
-            huResult.textContent = "Clicked outside image.";
+  function syncCanvasToImage(imgEl, canvasEl) { const dpr = window.devicePixelRatio || 1; const rect = imgEl.getBoundingClientRect(); canvasEl.width = Math.max(1, Math.round(rect.width * dpr)); canvasEl.height = Math.max(1, Math.round(rect.height * dpr)); const ctx = canvasEl.getContext("2d"); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.scale(dpr, dpr); ctx.clearRect(0, 0, canvasEl.width, canvasEl.height); return ctx; }
+  function drawMarker(ctx, xCss, yCss) { ctx.fillStyle = "red"; ctx.beginPath(); ctx.arc(xCss, yCss, 5 / (window.devicePixelRatio || 1), 0, 2 * Math.PI); ctx.fill(); }
+  function cssToPngPixels(imgEl, evt) { const rect = imgEl.getBoundingClientRect(); const nW = imgEl.naturalWidth; const nH = imgEl.naturalHeight; const dispW = rect.width; const dispH = rect.height; const scaleX = nW / dispW; const scaleY = nH / dispH; const xCss = evt.clientX - rect.left; const yCss = evt.clientY - rect.top; if (xCss < 0 || yCss < 0 || xCss > dispW || yCss > dispH) return null; const xPix = Math.floor(xCss * scaleX); const yPix = Math.floor(yCss * scaleY); return { xPix, yPix, xCss, yCss }; }
+  
+  function bindHU(view) {
+    const img = document.getElementById(`image_${view}`);
+    const canvas = document.getElementById(`overlay_${view}`);
+    let ctx = null;
+    function resetCanvas() { ctx = syncCanvasToImage(img, canvas); }
+    img.addEventListener("load", resetCanvas);
+    new ResizeObserver(resetCanvas).observe(img);
+    img.addEventListener("click", (evt) => {
+      if (!huMode) return;
+      resetCanvas();
+      const mapped = cssToPngPixels(img, evt);
+      if (!mapped) { huResult.textContent = "Clicked outside image."; return; }
+      const slider = document.getElementById(`slider_${view}`);
+      const idx = parseInt(slider.value, 10);
+      fetch(`/hu_value?view=${view}&x=${mapped.xPix}&y=${mapped.yPix}&index=${idx}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.error) {
+            huResult.textContent = "Error: " + data.error;
             return;
           }
-
-          // Obtener el índice actual del slider correspondiente a esta vista
-          const slider = document.getElementById(`slider_${view}`);
-          const idx = parseInt(slider.value, 10);
-
-          // Llamar al servidor para obtener el valor HU en esa coordenada
-          fetch(`/hu_value?view=${view}&x=${mapped.xPix}&y=${mapped.yPix}&index=${idx}`)
-            .then(r => r.json())
-            .then(data => {
-              if (data.error) {
-                huResult.textContent = "Error: " + data.error;
-                return;
-              }
-              // Mostrar resultado detallado
-              huResult.textContent = `HU (${view}, index=${idx}) @ 2D(x=${mapped.xPix}, y=${mapped.yPix}) → voxel(z=${data.voxel.z}, y=${data.voxel.y}, x=${data.voxel.x}): HU=${data.hu}`;
-              // Dibujar marcador donde se hizo click
-              drawMarker(ctx, mapped.xCss, mapped.yCss);
-            })
-            .catch(() => { huResult.textContent = "Error fetching HU value."; });
-        });
-
-        // Redibujar overlay si se cambia el tamaño de la ventana
-        window.addEventListener("resize", resetCanvas);
-      }
-
-      // --- Botón de activación/desactivación ---
-      huToggle.addEventListener("click", () => {
-        huMode = !huMode;
-        huToggle.textContent = huMode ? "Desactivar Selector HU" : "Activar Selector HU";
-        huInfo.textContent   = huMode ? "Haz click dentro de cualquier imagen para obtener las HU." : "";
-        // Limpiar overlays al desactivar
-        if (!huMode) {
-          ["axial","sagital","coronal"].forEach(v => {
-            const img = document.getElementById(`image_${v}`);
-            const canvas = document.getElementById(`overlay_${v}`);
-            const ctx = syncCanvasToImage(img, canvas);
-            ctx.clearRect(0,0,canvas.width, canvas.height);
-          });
-        }
+          huResult.innerHTML = `Voxel (X, Y, Z): ${data.voxel.x}, ${data.voxel.y}, ${data.voxel.z}<br>Valor HU: ${data.hu}`;
+          drawMarker(ctx, mapped.xCss, mapped.yCss);
+        }).catch(() => { huResult.textContent = "Error fetching HU value."; });
+    });
+  }
+  
+  huToggle_hiddenButton.addEventListener("click", () => {
+    huMode = !huMode;
+    huInfo.textContent = huMode ? "Haz click dentro de cualquier imagen para obtener las HU." : "";
+    if (!huMode) {
+      ["axial", "sagital", "coronal"].forEach(v => {
+        const img = document.getElementById(`image_${v}`);
+        const canvas = document.getElementById(`overlay_${v}`);
+        syncCanvasToImage(img, canvas);
       });
+    }
+  });
 
-      // --- Vincular las tres vistas 2D ---
-      ["axial","sagital","coronal"].forEach(bindHU);
-    </script>
-      
-     
+  ["axial", "sagital", "coronal"].forEach(bindHU);
 
-    <!-- JS fullscreen (sin cambios) -->
-    <script>
-      function toggleFullscreen(id) {
-        const element = document.getElementById(id);
+  // --- LÓGICA DE SLIDERS ---
+  function setupSlider(view) {
+    const slider = document.getElementById(`slider_${view}`);
+    const number = document.getElementById(`number_${view}`);
+    const image = document.getElementById(`image_${view}`);
+    function updateImage(layer) { image.src = `/image/${view}/${layer}?t=${new Date().getTime()}`; }
+    slider.addEventListener('input', () => { number.value = slider.value; updateImage(slider.value); });
+    number.addEventListener('input', () => { let val = Number(number.value); if (val < slider.min) val = slider.min; if (val > slider.max) val = slider.max; slider.value = val; updateImage(val); });
+  }
+  setupSlider('axial');
+  setupSlider('sagital');
+  setupSlider('coronal');
 
-        if (!document.fullscreenElement) {
-          element.requestFullscreen().then(() => {
-            element.classList.add('fullscreen');
-          }).catch(err => {
-            alert(`Error al entrar en pantalla completa: ${err.message}`);
-          });
-        } else {
-          document.exitFullscreen().then(() => {
-            document.querySelector('.fullscreen')?.classList.remove('fullscreen');
-          });
-        }
-      }
-    </script>
+  // --- LÓGICA DE FULLSCREEN Y FORMULARIO ---
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) { document.querySelector('.fullscreen')?.classList.remove('fullscreen'); } });
+  const rtStructForm = document.getElementById('rtStructForm'); if (rtStructForm) { rtStructForm.addEventListener("submit", function (event) { event.preventDefault(); let formData = new FormData(this); const token = document.querySelector('meta[name="csrf-token"]').content; fetch("/upload_RT", { method: "POST", headers: { 'X-CSRFToken': token }, body: formData }).then(() => { alert("Archivo cargado correctamente."); }); }); }
 
-    <!-- JS carga (sin cambios) -->
-    <script>
-      document.querySelector("form").addEventListener("submit", function (event) {
-        event.preventDefault();
-        let formData = new FormData(this);
+}); // --- CIERRE DEL DOMCONTENTLOADED ---
 
-        const token = document.querySelector('meta[name="csrf-token"]').content;
-        fetch("/upload_RT", {
-          method: "POST",
-          headers: { 'X-CSRFToken': token },
-          body: formData
-        }).then(() => {
-          alert("Archivo cargado correctamente.");
-        });
-      });
-    </script>
+// La función de fullscreen debe estar en el scope global para que el 'onclick' la encuentre
+function toggleFullscreen(id) {
+  const element = document.getElementById(id);
+  if (!document.fullscreenElement) {
+    element.requestFullscreen().catch(err => {
+      alert(`Error al entrar en pantalla completa: ${err.message}`);
+    });
+  } else {
+    document.exitFullscreen();
+  }
+}
+</script>
 
-  {% endif %}
-</div>
-{% endblock %}
+{% endblock content %}
+{% endblock main_container %}

@@ -595,3 +595,77 @@ input[type="file"]::file-selector-button:hover {
   height: 100%; /* Que se llenen en altura */
   min-height: 0; /* Para evitar problemas de flexbox */
 }
+
+/* --- Estilos del Visor DICOM --- */
+
+/* Contenedor principal que centra y limita el ancho del visor */
+#viewer-wrapper {
+  max-width: 1600px;
+  margin: 0 auto;
+  height: calc(100vh - 80px);
+}
+
+/* Contenedor flex que alinea la sidebar y la grilla */
+#viewer-container {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+/* Sidebar de plugins a la izquierda */
+#plugins-sidebar {
+  flex-basis: 280px;
+  flex-shrink: 0;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+/* Contenedor para la grilla de cuadrantes a la derecha */
+#quadrant-grid-wrapper {
+  flex-grow: 1;
+  padding: 1rem;
+  min-width: 0;
+}
+
+/* La grilla 2x2 donde viven los cuadrantes */
+#quadrant-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 1rem;
+    height: 100%;
+    width: 100%;
+}
+
+/* Estilo para cada tarjeta de cuadrante */
+.quadrant-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.quadrant-card .card-body {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  min-height: 0;
+}
+
+/* Contenedor de la imagen/iframe dentro de la tarjeta */
+.image-wrapper, .iframe-wrapper {
+  flex-grow: 1;
+  position: relative;
+  min-height: 0;
+}
+
+/* La imagen y el canvas se ajustan a su contenedor */
+.image-wrapper img, .iframe-wrapper iframe, .image-wrapper canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
