@@ -1,5 +1,4 @@
 # --- 1. IMPORTACIONES DE LIBRERÍAS ---
-# Flask y extensiones para la aplicación web y formularios
 from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file
 from flask import session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -7,150 +6,132 @@ from flask_wtf import FlaskForm, CSRFProtect
 from flask_wtf.csrf import generate_csrf
 from wtforms import StringField, PasswordField, SubmitField
 from wtforms.validators import InputRequired, Length, EqualTo
-
-# Utilidades del sistema y manejo de archivos
-import os
-import tempfile
-import zipfile
+import os, tempfile, zipfile
 from collections import defaultdict
 from uuid import uuid4
 from io import BytesIO
-
-# Librerías para procesamiento científico y de imágenes
 import numpy as np
 import numpy.ma as ma
-import pydicom  # Para leer archivos DICOM
-import nrrd     # Para leer archivos NRRD (RT Struct)
-
-# Librerías de visualización
+import pydicom
+import nrrd
 import pyvista as pv
 import panel as pn
 import matplotlib
-matplotlib.use('Agg') # Modo no interactivo para servidores
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 # --- CONFIGURACIÓN INICIAL DE PYVISTA ---
-pv.OFF_SCREEN = True # Asegura que PyVista no intente crear ventanas visibles
-pv.global_theme.jupyter_backend = 'static' # Usa un motor gráfico que no depende de la pantalla
+pv.OFF_SCREEN = True
+pv.global_theme.jupyter_backend = 'static'
 
 # --- 2. CONFIGURACIÓN DE LA APLICACIÓN FLASK ---
 app = Flask(__name__)
-
-# Claves secretas para seguridad de la sesión y formularios
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(24))
 app.config['WTF_CSRF_ENABLED'] = True
 app.config['WTF_CSRF_SECRET_KEY'] = os.environ.get("WTF_CSRF_SECRET_KEY", app.secret_key)
 csrf = CSRFProtect(app)
 
 # --- 3. SISTEMA DE SESIÓN PARA MÚLTIPLES USUARIOS ---
-
-# Diccionario global que funciona como un almacén en memoria para los datos de cada sesión
 SERVER_SIDE_SESSION_STORE = {}
-
 def get_user_data():
-    """
-    Gestiona y recupera el diccionario de datos para el usuario actual.
-    Si el usuario es nuevo, le asigna un ID único y crea un espacio para sus datos.
-    """
     if 'user_session_id' not in session:
         user_id = str(uuid4())
         session['user_session_id'] = user_id
         SERVER_SIDE_SESSION_STORE[user_id] = {}
     user_id = session['user_session_id']
-    # setdefault asegura que si el user_id se perdió por alguna razón, se cree un dict vacío
     return SERVER_SIDE_SESSION_STORE.setdefault(user_id, {})
 
 # --- 4. CONFIGURACIÓN Y VARIABLES GLOBALES DE LA APP ---
-
-# Inyecta variables globales en todas las plantillas HTML para saber si el usuario está logueado
 @app.context_processor
 def inject_user_and_csrf():
-    return {
-        'user_logged_in': session.get('user_logged_in', False),
-        'user_initials': session.get('user_initials', ''),
-        'csrf_token': generate_csrf
-    }
+    return { 'user_logged_in': session.get('user_logged_in', False), 'user_initials': session.get('user_initials', ''), 'csrf_token': generate_csrf }
 
-# Definición de carpetas para almacenar archivos subidos
-UPLOAD_FOLDER = 'uploads'
-UPLOAD_FOLDER_NRRD = 'upload_nrrd'
-ANONIMIZADO_FOLDER = os.path.join(os.getcwd(), 'anonimizado')
-# Crea las carpetas si no existen al iniciar la aplicación
+UPLOAD_FOLDER, UPLOAD_FOLDER_NRRD, ANONIMIZADO_FOLDER = 'uploads', 'upload_nrrd', os.path.join(os.getcwd(), 'anonimizado')
 for folder in [UPLOAD_FOLDER, UPLOAD_FOLDER_NRRD, ANONIMIZADO_FOLDER]:
-    if not os.path.exists(folder):
-        os.makedirs(folder)
+    if not os.path.exists(folder): os.makedirs(folder)
 
-# Inicialización de Panel y Bokeh para la vista 3D
 pn.extension('vtk')
 bokeh_server_started = False
 def start_bokeh_server(panel_layout):
-    """Inicia el servidor de Bokeh en un hilo separado si aún no se ha iniciado."""
     global bokeh_server_started
     if not bokeh_server_started:
         pn.serve({'/panel': panel_layout}, show=False, allow_websocket_origin=["*"], port=5010, threaded=True)
         bokeh_server_started = True
 
 # --- 5. LÓGICA DE VISUALIZACIÓN Y PROCESAMIENTO DICOM ---
-
 def create_render(user_data):
-    """Crea el panel de visualización 3D inicial con el hueso y la piel."""
+    """Crea el panel de visualización 3D con un slider de opacidad robusto."""
     panel_column = pn.Column()
     dicom_image = user_data.get('Image', np.array([]))
     if dicom_image.size == 0: return None
 
-    # Segmentación simple por rangos de HU para hueso y piel
+    # Segmentación y preparación de mallas (sin cambios)
     volume_bone = ((dicom_image > 175) * 1).astype(np.int16)
     volume_skin = (((dicom_image > -200) & (dicom_image < 0)) * 1).astype(np.int16)
     unique_id = user_data.get("unique_id")
     series_info = user_data.get('dicom_series', {}).get(unique_id, {})
     if not series_info: return None
     
-    # Extrae metadatos espaciales para construir la malla 3D correctamente
     origin = series_info.get("ImagePositionPatient")
-    spacing_xy = series_info.get("PixelSpacing", [1, 1])
-    spacing_z = series_info.get("SliceThickness", 1)
-    spacing = (spacing_z, spacing_xy[0], spacing_xy[1])
+    spacing = (series_info.get("SliceThickness", 1), series_info.get("PixelSpacing", [1,1])[0], series_info.get("PixelSpacing", [1,1])[1])
 
-    # Creación de la malla 3D para el hueso
     grid_bone = pv.ImageData(dimensions=np.array(volume_bone.shape) + 1, origin=origin, spacing=spacing)
     grid_bone.cell_data["values"] = volume_bone.flatten(order="F")
-    grid_bone = grid_bone.cell_data_to_point_data() # Conversión necesaria para el filtro de contorno
+    grid_bone = grid_bone.cell_data_to_point_data()
     surface_bone = grid_bone.contour([0.5])
 
-    # Creación de la malla 3D para la piel
     grid_skin = pv.ImageData(dimensions=np.array(volume_skin.shape) + 1, origin=origin, spacing=spacing)
     grid_skin.cell_data["values"] = volume_skin.flatten(order="F")
-    grid_skin = grid_skin.cell_data_to_point_data() # Conversión necesaria
-    surface_skin = grid_skin.contour([0.5])
+    grid_skin = grid_skin.cell_data_to_point_data()
+    surface_skin = grid_skin.contour([0.5]) # Esta es la geometría de la piel
     
     user_data['grid_dicom'] = grid_skin
     
-    # Configuración del plotter de PyVista
+    # Configuración del plotter (sin cambios)
     plotter = pv.Plotter(off_screen=True)
     plotter.set_background("black")
     plotter.add_mesh(surface_bone, color="white", smooth_shading=True)
-    skin_actor = plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, name="skin", smooth_shading=True)
+    plotter.add_mesh(surface_skin, color="peachpuff", opacity=1.0, name="skin", smooth_shading=True)
     plotter.view_isometric()
     
-    # Creación de los componentes de la interfaz de Panel (slider, etc.)
-    panel_vtk = pn.pane.VTK(plotter.ren_win, width=400, height=500)
-    slider = pn.widgets.FloatSlider(name="Opacidad de la piel", start=0.0, end=1.0, step=0.05, value=0.5)
-    def update_opacity(event):
-        skin_actor.GetProperty().SetOpacity(event.new)
-        panel_vtk.param.trigger('object')
-    slider.param.watch(update_opacity, 'value')
-    panel_column[:] = [panel_vtk, slider]
+    panel_vtk = pn.pane.VTK(plotter.ren_win, sizing_mode='stretch_both')
+
+    # --- CAMBIO PRINCIPAL: Se restaura el slider con la lógica corregida ---
     
-    # Guardar los objetos VTK/Panel en la sesión del usuario para futuras interacciones
-    user_data.update({'vtk_plotter': plotter, 'vtk_panel_column': panel_column, 'vtk_panel': panel_vtk, 'vtk_skin_actor': skin_actor, 'vtk_slider': slider})
+    # 1. Se crea el slider, con el valor por defecto al máximo (1.0)
+    opacity_slider = pn.widgets.FloatSlider(
+        name='Opacidad de la Piel', 
+        start=0.0, end=1.0, step=0.05, value=1.0
+    )
+    
+    # 2. La función de actualización utiliza el método robusto de "quitar y poner"
+    def update_opacity_slider(event):
+        new_opacity = event.new
+        plotter.remove_actor('skin')
+        plotter.add_mesh(surface_skin, color="peachpuff", opacity=new_opacity, name="skin", smooth_shading=True)
+        panel_vtk.object = plotter.ren_win
+        
+    # 3. Se asocia la función de actualización al slider
+    opacity_slider.param.watch(update_opacity_slider, 'value')
+
+    # Se colocan el slider y el visor en la columna, con el slider arriba
+    panel_column[:] = [opacity_slider, panel_vtk]
+    
+    user_data.update({'vtk_plotter': plotter, 'vtk_panel_column': panel_column, 'vtk_panel': panel_vtk})
     return panel_column
 
 def add_RT_to_plotter(user_data):
     """Añade una malla de segmentación (RT Struct) al plotter 3D existente."""
-    plotter, panel_vtk, skin_actor, panel_column, grid_dicom = (user_data.get(k) for k in ['vtk_plotter', 'vtk_panel', 'vtk_skin_actor', 'vtk_panel_column', 'grid_dicom'])
-    if not all([plotter, panel_vtk, skin_actor, panel_column, grid_dicom]): return None
-    
+    # Obtiene los objetos necesarios de la sesión del usuario
+    plotter = user_data.get('vtk_plotter')
+    panel_vtk = user_data.get('vtk_panel')
+    grid_dicom = user_data.get('grid_dicom')
+
+    # Valida que todos los objetos necesarios existan
+    if not all([plotter, panel_vtk, grid_dicom]):
+        return None
+
     # Procesa y alinea la imagen RT
     RT_Image = np.flip(user_data['RT'], axis=(0, 2)).transpose(2, 0, 1)
     user_data['RT_aligned'] = np.flip(user_data['RT'], axis=(0, 2))
@@ -160,18 +141,35 @@ def add_RT_to_plotter(user_data):
     rt_grid.cell_data["values"] = (RT_Image > 1).astype(np.uint8).flatten(order="F")
     rt_grid = rt_grid.cell_data_to_point_data()
     surface = rt_grid.contour([0.5])
-    mask_actor = plotter.add_mesh(surface, color="red", opacity=0.5, smooth_shading=True)
-    
-    # Añade un botón para mostrar/ocultar la máscara
-    toggle_button = pn.widgets.Toggle(name='Mostrar/Ocultar máscara', button_type='danger', value=True)
-    def toggle_mask_visibility(event):
-        mask_actor.GetProperty().SetOpacity(0.5 if event.new else 0.0)
-    toggle_button.param.watch(toggle_mask_visibility, 'value')
+    user_data['rt_surface'] = surface # Guarda la geometría para poder mostrarla/ocultarla después
 
+    # Añade la malla inicial al plotter con un nombre
+    plotter.add_mesh(surface, color="red", opacity=0.5, smooth_shading=True, name="mask_actor")
+
+    # --- LÓGICA DEL BOTÓN INTERNO ELIMINADA ---
+    # Ya no se crea ni se añade el pn.widgets.Toggle a la columna del panel.
+
+    # Actualiza la vista para que la máscara aparezca inmediatamente
     plotter.render()
     panel_vtk.object = plotter.ren_win
-    panel_column.append(toggle_button)
-    return panel_column
+    
+    return user_data.get('vtk_panel_column')
+
+@app.route('/toggle_rt_visibility', methods=['POST'])
+def toggle_rt_visibility():
+    """Maneja la visibilidad de la máscara RT Struct desde el botón del plugin en la sidebar."""
+    user_data = get_user_data()
+    plotter = user_data.get('vtk_plotter')
+    panel_vtk = user_data.get('vtk_panel')
+    surface = user_data.get('rt_surface') 
+    if not all([plotter, panel_vtk]):
+        return jsonify({"error": "El visor no está inicializado"}), 400
+    is_visible = request.json.get('visible', False)
+    plotter.remove_actor("mask_actor")
+    if is_visible and surface is not None:
+        plotter.add_mesh(surface, color="red", opacity=0.5, smooth_shading=True, name="mask_actor")
+    panel_vtk.object = plotter.ren_win
+    return jsonify({"status": "ok", "visible": is_visible})
 
 def _extract_spacing_for_series(unique_id, user_data):
     """Calcula el espaciado entre píxeles (dx, dy, dz) de forma robusta."""
@@ -456,7 +454,7 @@ def exportar_dicom():
             for f in os.listdir(out_dir): zipf.write(os.path.join(out_dir, f), f)
         return send_file(zip_path, as_attachment=True, download_name='archivos_anonimizados.zip')
 
-# --- 7. RUTAS DE LOGIN Y REGISTRO (SIN CAMBIOS) ---
+# --- 7. RUTAS DE LOGIN Y REGISTRO  ---
 class LoginForm(FlaskForm):
     username = StringField('Usuario', validators=[InputRequired(), Length(min=4, max=15)])
     password = PasswordField('Contraseña', validators=[InputRequired(), Length(min=4, max=20)])
