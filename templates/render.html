@@ -1,241 +1,97 @@
 {% extends "home.html" %}
+
+{% block main_container %}
 {% block content %}
 
-<style>
-  :root {
-    --gap: 8px;
-    --panel:#0f1218; --border:#262a33; --fg:#e7e7ea; --bg:#0a0c10;
-    --pad: 8px;            /* padding lateral/superior/inferior del visor */
-    --toolbar-h: 44px;     /* altura estimada de la barra (se recalcula por JS) */
-  }
+<div id="viewer-wrapper">
+  <div id="viewer-container">
 
-  /* Permitimos scroll solo si realmente no cabe todo */
-  html, body {
-    height: 100%;
-    overflow: auto;
-    background: var(--bg);
-    color: var(--fg);
-  }
+    <div id="plugins-sidebar" class="bg-dark d-flex flex-column p-3 border-end border-secondary">
+      <h5 class="text-light mb-3">Plugins</h5>
+      
+      <button id="rtStructPluginBtn" class="btn btn-secondary w-100 mb-2" 
+              data-bs-toggle="tooltip" data-bs-placement="right" title="Sube un archivo RT Struct para superponer una segmentación.">
+        <i class="bi bi-upload"></i> Cargar RT Struct
+      </button>
+      <div id="rtStructPluginContainer" class="w-100 mb-3" style="display: none;">
+        <form id="rtStructForm" action="/upload_RT" method="post" enctype="multipart/form-data" class="d-flex flex-column gap-2 w-100 mt-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="file" name="file" accept=".nrrd" class="form-control" required>
+          <button type="submit" class="btn btn-udg-dorado shadow-sm w-100"><i class="bi bi-upload"></i> Subir</button>
+        </form>
+      </div>
+      
+      <button id="huPickerPluginBtn" class="btn btn-secondary w-100 mb-2"
+              data-bs-toggle="tooltip" data-bs-placement="right" title="Activa el modo para hacer clic en la imagen y obtener el valor HU en un punto específico.">
+        <i class="bi bi-bullseye"></i> Selector HU
+      </button>
+      <div id="huPickerPluginContainer" class="w-100 mb-3" style="display: none;">
+        <small id="huInfo" class="text-secondary d-block mt-2"></small>
+        <div id="huResult" class="small text-warning mt-1"></div>
+      </div>
 
-  /* Raíz del visor: barra + grid que ocupa el resto del alto visible */
-  #viewer-root {
-    min-height: 100vh;
-    display: grid;
-    grid-template-rows: auto 1fr;
-    gap: var(--gap);
-    padding: var(--pad);
-    box-sizing: border-box;
-  }
+      <button id="windowLevelBtn" class="btn btn-secondary w-100 mb-2"
+              data-bs-toggle="tooltip" data-bs-placement="right" title="Muestra los sliders para ajustar el brillo y contraste de las imágenes.">
+        <i class="bi bi-sliders"></i> Ajuste de Ventana
+      </button>
+      <div id="windowLevelControls" class="w-100 mb-3" style="display: none;">
+        <div class="mt-2">
+          <label for="wc_slider" class="form-label small">Brillo (Centro): <span id="wc_value">40</span></label>
+          <input type="range" class="form-range" id="wc_slider" min="-1000" max="1000" value="40">
+        </div>
+        <div class="mt-2">
+          <label for="ww_slider" class="form-label small">Contraste (Ancho): <span id="ww_value">400</span></label>
+          <input type="range" class="form-range" id="ww_slider" min="1" max="2500" value="400">
+        </div>
+        <div class="d-flex justify-content-between mt-3">
+            <button id="presetBtnLung" class="btn btn-sm btn-outline-light">Pulmón</button>
+            <button id="presetBtnBone" class="btn btn-sm btn-outline-light">Hueso</button>
+            <button id="presetBtnSoftTissue" class="btn btn-sm btn-outline-light">Tejido</button>
+        </div>
+      </div>
 
-  /* Barra superior compacta */
-  .toolbar {
-    display: flex; align-items: center; gap: 10px;
-    background: #11141b; border: 1px solid var(--border);
-    border-radius: 10px; padding: 6px 8px;
-  }
-
-  /* Altura del grid = ventana - barra - paddings - gap entre barra y grid */
-  .quad-grid {
-    height: calc(100vh - var(--toolbar-h) - (var(--pad) * 2) - var(--gap));
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows:
-      calc((100vh - var(--toolbar-h) - (var(--pad) * 2) - var(--gap)) / 2)
-      calc((100vh - var(--toolbar-h) - (var(--pad) * 2) - var(--gap)) / 2);
-    gap: var(--gap);
-    overflow: hidden; /* sin scroll interno del grid */
-  }
-
-  .panel {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    overflow: hidden;                 /* el contenido se ajusta al panel */
-    display: grid;
-    grid-template-rows: 1fr;          /* todo el panel es viewport */
-  }
-
-  /* Viewport: ocupa TODO el panel (sin forzar cuadrado para que quepa mejor) */
-  .vp-wrap {
-    position: relative;
-    width: 100%; height: 100%;
-    background: #000;
-  }
-
-  /* Si prefieres 3D cuadrado, descomenta:
-  #panel-3d .vp-wrap { aspect-ratio: 1 / 1; }
-  */
-
-  .vp-img, .vp-iframe {
-    width: 100%; height: 100%;
-    display: block; border: 0; background: #000; object-fit: contain;
-    transform: translateZ(0);
-  }
-  /* Deja pasar el click al contenedor aunque la imagen se recargue */
-  .vp-img { pointer-events: none; -webkit-user-drag: none; user-select: none; }
-
-  /* Crosshair verde */
-  .crosshair-x, .crosshair-y {
-    position: absolute; pointer-events: none; background: rgba(0,255,0,.85);
-  }
-  .crosshair-x { left: 0; width: 100%; height: 1px; top: 50%; }
-  .crosshair-y { top: 0; height: 100%; width: 1px; left: 50%; }
-
-  /* Sliders flotantes compactos */
-  .ctrl-float {
-    position: absolute; left: 6px; top: 6px; z-index: 5;
-    display: inline-flex; align-items: center; gap: 6px;
-    background: rgba(10,12,16,.6); border: 1px solid rgba(255,255,255,.08);
-    padding: 4px 6px; border-radius: 8px; backdrop-filter: blur(4px);
-  }
-  .ctrl-float input[type="range"] { width: clamp(120px, 22vw, 280px); }
-  .ctrl-float input[type="number"] {
-    width: 70px; background: #0f1115; color: var(--fg);
-    border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px;
-  }
-
-  /* Más compacto en pantallas bajitas */
-  @media (max-height: 700px) {
-    :root { --gap: 6px; --pad: 6px; }
-    .ctrl-float input[type="range"] { width: 150px; }
-  }
-</style>
-
-<div id="viewer-root">
-  {% if success == 0 %}
-    <div class="toolbar"><strong>Carga primero una imagen DICOM.</strong></div>
-    <div></div>
-  {% else %}
-
-    <!-- Barra superior: Subir RT (NRRD) -->
-    <div class="toolbar">
-      <form id="rt-form" action="/upload_RT" method="post" enctype="multipart/form-data" class="d-flex gap-2">
-        <input type="file" name="file" accept=".nrrd" class="form-control form-control-sm bg-secondary text-light border-0">
-        <button type="submit" class="btn btn-success btn-sm">Subir RT (NRRD)</button>
-      </form>
-      <div style="flex:1"></div>
+      <button id="huToggle" style="display: none;">Activar Selector HU</button>
     </div>
 
-    <!-- GRID 2×2 COMPACTO (mitades exactas de la altura disponible) -->
-    <div class="quad-grid" id="quad-grid">
-      <!-- AXIAL -->
-      <section class="panel" id="panel-ax">
-        <div class="vp-wrap" data-view="axial">
-          <div class="ctrl-float">
-            <input type="range" id="slider_axial" min="0" max="{{ max_value_axial }}" step="1" value="{{max_value_axial//2}}">
-            <input type="number" id="number_axial" min="0" max="{{ max_value_axial }}" step="1" value="{{max_value_axial//2}}">
-          </div>
-          <img id="image_axial" class="vp-img" src="/image/axial/{{max_value_axial//2}}" alt="Axial">
-          <div class="crosshair-x"></div><div class="crosshair-y"></div>
+    <div id="quadrant-grid-wrapper">
+      {% if success == 0 %}
+        <div class="d-flex h-100 align-items-center justify-content-center">
+          <h1 class="text-light">Carga primero una imagen</h1>
         </div>
-      </section>
-
-      <!-- SAGITAL -->
-      <section class="panel" id="panel-sa">
-        <div class="vp-wrap" data-view="sagital">
-          <div class="ctrl-float">
-            <input type="range" id="slider_sagital" min="0" max="{{ max_value_sagital }}" step="1" value="{{max_value_sagital//2}}">
-            <input type="number" id="number_sagital" min="0" max="{{ max_value_sagital }}" step="1" value="{{max_value_sagital//2}}">
-          </div>
-          <img id="image_sagital" class="vp-img" src="/image/sagital/{{max_value_sagital//2}}" alt="Sagital">
-          <div class="crosshair-x"></div><div class="crosshair-y"></div>
+      {% else %}
+        <div id="quadrant-grid">
+          {% set views = [('axial', max_value_axial), ('sagital', max_value_sagital), ('coronal', max_value_coronal), ('3D', None)] %}
+          {% for view, max_val in views %}
+            <div id="card_{{ view }}" class="card bg-dark text-light border-secondary shadow-sm quadrant-card">
+              <div class="card-body p-2">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <h6 class="card-title mb-0 ms-2">Vista {{ view|upper }}</h6>
+                  <button type="button" class="btn btn-sm btn-outline-light" onclick="toggleFullscreen('card_{{ view }}')"><i class="bi bi-arrows-fullscreen"></i></button>
+                </div>
+                {% if view != '3D' %}
+                <div class="d-flex gap-2 align-items-center px-2">
+                  <input type="range" id="slider_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-range">
+                  <input type="number" id="number_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-control form-control-sm" style="width: 70px;">
+                </div>
+                <div class="image-wrapper mt-1">
+                  <img id="image_{{ view }}" src="/image/{{ view }}/{{ max_val // 2 }}" class="rounded" alt="{{ view }}" />
+                  <canvas id="overlay_{{ view }}" style="pointer-events:none;"></canvas>
+                </div>
+                {% else %}
+                <div class="iframe-wrapper mt-1">
+                  <iframe src="http://127.0.0.1:5010/panel" id="DicomRender" class="rounded" allowfullscreen></iframe>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
         </div>
-      </section>
-
-      <!-- 3D -->
-      <section class="panel" id="panel-3d">
-        <div class="vp-wrap">
-          <iframe class="vp-iframe" id="DicomRender" src="http://127.0.0.1:5010/panel" title="VTK 3D"></iframe>
-        </div>
-      </section>
-
-      <!-- CORONAL -->
-      <section class="panel" id="panel-co">
-        <div class="vp-wrap" data-view="coronal">
-          <div class="ctrl-float">
-            <input type="range" id="slider_coronal" min="0" max="{{ max_value_coronal }}" step="1" value="{{max_value_coronal//2}}">
-            <input type="number" id="number_coronal" min="0" max="{{ max_value_coronal }}" step="1" value="{{max_value_coronal//2}}">
-          </div>
-          <img id="image_coronal" class="vp-img" src="/image/coronal/{{max_value_coronal//2}}" alt="Coronal">
-          <div class="crosshair-x"></div><div class="crosshair-y"></div>
-        </div>
-      </section>
+      {% endif %}
     </div>
-
-    <!-- ===== JS: lógica visor ===== -->
-    <script>
-      // 1) Altura real de la barra → actualiza --toolbar-h para cálculo fino
-      function setToolbarHeightVar() {
-        const tb = document.querySelector('.toolbar');
-        const h = tb ? tb.getBoundingClientRect().height : 44;
-        document.documentElement.style.setProperty('--toolbar-h', `${h}px`);
-      }
-      window.addEventListener('load', setToolbarHeightVar);
-      window.addEventListener('resize', setToolbarHeightVar);
-
-      // 2) Helpers de imagen 2D
-      function updateImage(view, layer) {
-        const img = document.getElementById(`image_${view}`);
-        img.src = `/image/${view}/${layer}?t=${Date.now()}`; // cache-buster
-        requestAnimationFrame(paintCrosshairs); // repinta tras cambio
-      }
-
-      function setupSlider(view) {
-        const slider = document.getElementById(`slider_${view}`);
-        const number = document.getElementById(`number_${view}`);
-        function sync(val) {
-          const v = Math.max(+slider.min, Math.min(+slider.max, +val));
-          slider.value = v; number.value = v; updateImage(view, v);
-        }
-        slider.addEventListener('input', () => sync(slider.value));
-        number.addEventListener('input', () => sync(number.value));
-        sync(slider.value); // init
-      }
-      ['axial','sagital','coronal'].forEach(setupSlider);
-
-      // 3) Crosshair en verde (visual) + click robusto
-      const wraps = document.querySelectorAll('.vp-wrap[data-view]');
-      let crosshair = { x: .5, y: .5 };
-      function paintCrosshairs() {
-        wraps.forEach(w => {
-          const xLine = w.querySelector('.crosshair-y');
-          const yLine = w.querySelector('.crosshair-x');
-          if (xLine && yLine) {
-            xLine.style.left = (crosshair.x * 100) + '%';
-            yLine.style.top  = (crosshair.y * 100) + '%';
-          }
-        });
-      }
-      paintCrosshairs();
-
-      function handleClick(e) {
-        const wrap = e.currentTarget.classList.contains('vp-img')
-          ? e.currentTarget.closest('.vp-wrap')
-          : e.currentTarget;
-
-        const r = wrap.getBoundingClientRect();
-        crosshair.x = (e.clientX - r.left) / r.width;
-        crosshair.y = (e.clientY - r.top)  / r.height;
-        paintCrosshairs();
-      }
-
-      wraps.forEach(w => {
-        w.addEventListener('click', handleClick, { passive: true });
-        const img = w.querySelector('.vp-img');
-        if (img) img.addEventListener('click', handleClick, { passive: true });
-      });
-
-      // 4) Subida de RT sin refrescar la página principal
-      const rtForm = document.getElementById('rt-form');
-      rtForm.addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        const fd = new FormData(rtForm);
-        await fetch('/upload_RT', { method:'POST', body: fd });
-        // Recargar SOLO el panel 3D para ver la segmentación
-        document.getElementById('DicomRender').contentWindow.location.reload();
-      });
-    </script>
-
-  {% endif %}
+  </div>
 </div>
-{% endblock %}
+
+<script src="{{ url_for('static', filename='js/viewer.js') }}"></script>
+
+{% endblock content %}
+{% endblock main_container %}

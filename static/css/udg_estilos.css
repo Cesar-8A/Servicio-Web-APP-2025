@@ -521,3 +521,151 @@ input[type="file"]::file-selector-button:hover {
     font-weight: 600;
     margin-top: 2rem;
 }
+
+.fullscreen img,
+.fullscreen {
+    width: 90vw;
+    height: 90vh;
+    max-width: 1200px;
+    max-height: 700px;
+    margin: auto;
+    background-color: var(--gris-oscuro);
+    padding: 1rem;
+    border-radius: 12px;
+    box-shadow: 0 0 12px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .fullscreen iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    border-radius: 8px;
+    object-fit: contain;
+  }
+
+.fullscreen .card-body {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.fullscreen img.img-fluid {
+    max-width: none !important;
+    height: 100% !important;
+}
+
+.image-wrapper {
+  width: 100%;
+  aspect-ratio: 1; /* o usa 4/3, 16/9 si quieres proporciones diferentes */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.image-wrapper img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.iframe-wrapper {
+  width: 100%;
+  height: 100%;      /* O asigna un height fijo alto si usas flexbox en el padre */
+  aspect-ratio: 4 / 3; /* Mantén proporción, o ajusta */
+  overflow: hidden;  /* Para que no haya scroll */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.iframe-wrapper iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+#card_3D, 
+#card_3D > .card-body, 
+.iframe-wrapper {
+  height: 100%; /* Que se llenen en altura */
+  min-height: 0; /* Para evitar problemas de flexbox */
+}
+
+/* --- Estilos del Visor DICOM --- */
+
+/* Contenedor principal que centra y limita el ancho del visor */
+#viewer-wrapper {
+  max-width: 1600px;
+  margin: 0 auto;
+  height: calc(100vh - 80px);
+}
+
+/* Contenedor flex que alinea la sidebar y la grilla */
+#viewer-container {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+/* Sidebar de plugins a la izquierda */
+#plugins-sidebar {
+  flex-basis: 280px;
+  flex-shrink: 0;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+/* Contenedor para la grilla de cuadrantes a la derecha */
+#quadrant-grid-wrapper {
+  flex-grow: 1;
+  padding: 1rem;
+  min-width: 0;
+}
+
+/* La grilla 2x2 donde viven los cuadrantes */
+#quadrant-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 1rem;
+    height: 100%;
+    width: 100%;
+}
+
+/* Estilo para cada tarjeta de cuadrante */
+.quadrant-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.quadrant-card .card-body {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  min-height: 0;
+}
+
+/* Contenedor de la imagen/iframe dentro de la tarjeta */
+.image-wrapper, .iframe-wrapper {
+  flex-grow: 1;
+  position: relative;
+  min-height: 0;
+}
+
+/* La imagen y el canvas se ajustan a su contenedor */
+.image-wrapper img, .iframe-wrapper iframe, .image-wrapper canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}

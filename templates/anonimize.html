@@ -20,7 +20,12 @@
                 <tr id="row_{{ field }}">
                     <td><strong>{{ value }}</strong></td>
                     <td>
-                        <input type="text" class="form-control" name="{{ unique_id }}_{{ field }}" value="Anonimo" placeholder="Actualizar {{ field }}">
+                        <input type="text" class="form-control"
+                            name="{{ unique_id }}_{{ field }}"
+                            data-uid="{{ unique_id }}"
+                            data-field="{{ field }}"
+                            value="Anonimo" placeholder="Actualizar {{ field }}">
+
                     </td>
                     <td>
                         <button type="button" class="btn btn-danger btn-sm shadow-sm" onclick="excluirCampo('{{ field }}')">
@@ -69,18 +74,24 @@
     function guardarCambios() {
         let cambiosAnonimizacion = {};
         document.querySelectorAll('input[type="text"]').forEach(input => {
-            let field = input.name.split('_')[1];
-            let nuevoValor = input.value.trim();
-            if (nuevoValor !== "") {
-                cambiosAnonimizacion[field] = nuevoValor;
-            }
-        });
+        const field = input.dataset.field || input.name.split('_').slice(1).join('_');
+        const nuevoValor = input.value.trim();
+        if (nuevoValor !== "") {
+            cambiosAnonimizacion[field] = nuevoValor;
+        }
+    });
 
+
+        const token = document.querySelector('meta[name="csrf-token"]').content;
         fetch('/guardar_cambios', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cambios: cambiosAnonimizacion }),
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': token
+        },
+        body: JSON.stringify({ cambios: cambiosAnonimizacion }),
         })
+
         .then(response => response.json())
         .then(() => alert("Cambios guardados correctamente."))
         .catch(() => alert("Hubo un error al guardar los cambios."));

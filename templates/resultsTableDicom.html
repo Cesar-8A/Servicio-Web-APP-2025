@@ -67,11 +67,16 @@
             acceptButton.innerHTML = '<i class="bi bi-hourglass-split"></i> Procesando...';
             acceptButton.disabled = true;
 
+            const token = document.querySelector('meta[name="csrf-token"]').content;
             fetch('/process_selected_dicom', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ unique_id: selectedId }) 
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': token
+            },
+            body: JSON.stringify({ unique_id: selectedId })
             })
+
             .then(response => response.json())
             .then(data => {
                 console.log("Respuesta del servidor:", data);
