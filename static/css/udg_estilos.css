@@ -522,45 +522,36 @@ input[type="file"]::file-selector-button:hover {
     margin-top: 2rem;
 }
 
-.fullscreen img,
-.fullscreen {
-    width: 90vw;
-    height: 90vh;
-    max-width: 1200px;
-    max-height: 700px;
-    margin: auto;
-    background-color: var(--gris-oscuro);
-    padding: 1rem;
-    border-radius: 12px;
-    box-shadow: 0 0 12px rgba(0, 0, 0, 0.6);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-  }
-
-  .fullscreen iframe {
-    width: 100%;
-    height: 100%;
-    border: none;
-    border-radius: 8px;
-    object-fit: contain;
-  }
-
-.fullscreen .card-body {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
+.fullscreen-active {
+  position: fixed; /* Lo saca del flujo normal del documento */
+  top: 0;
+  left: 0;
+  width: 100vw; /* 100% del ancho de la ventana */
+  height: 100vh; /* 100% de la altura de la ventana */
+  background-color: var(--gris-oscuro);
+  z-index: 1050; /* Un z-index alto para que se ponga por encima de todo */
+  padding: 1.5rem; /* Un poco de espacio en los bordes */
+  display: flex;
+  flex-direction: column;
 }
 
-.fullscreen img.img-fluid {
-    max-width: none !important;
-    height: 100% !important;
+/* Asegura que el contenido dentro del modo pantalla completa se expanda */
+.fullscreen-active .card-body,
+.fullscreen-active .image-wrapper,
+.fullscreen-active .iframe-wrapper {
+  height: 100%;
+  width: 100%;
+  flex-grow: 1; /* Permite que el contenedor crezca para llenar el espacio */
+}
+
+.fullscreen-active iframe {
+  border: 1px solid var(--gris-fuerte); /* Un borde sutil para el iframe */
+  border-radius: 8px;
 }
 
 .image-wrapper {
   width: 100%;
-  aspect-ratio: 1; /* o usa 4/3, 16/9 si quieres proporciones diferentes */
+  aspect-ratio: 1; /* usa 4/3, 16/9 si quieres proporciones diferentes */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -614,7 +605,7 @@ input[type="file"]::file-selector-button:hover {
 
 /* Sidebar de plugins a la izquierda */
 #plugins-sidebar {
-  flex-basis: 280px;
+  flex-basis: 340px; 
   flex-shrink: 0;
   padding: 1rem;
   overflow-y: auto;
@@ -668,4 +659,67 @@ input[type="file"]::file-selector-button:hover {
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+/* Estilo para la cuadrícula de información del punto de control */
+.point-info-grid {
+  display: grid;
+  grid-template-columns: auto 1fr; /* Columna para etiqueta, Columna para valor */
+  gap: 2px 8px; /* Espacio entre filas y columnas */
+  align-items: center;
+}
+
+/* Estilo para las etiquetas (Id:, x:, y:) */
+.point-info-grid span:nth-child(odd) {
+  font-weight: bold;
+  text-align: right;
+  color: var(--gris-debil);
+}
+
+/* Ajuste para los botones de preajuste (Pulmón, Hueso, Tejido) */
+#windowLevelControls .d-flex {
+  gap: 0.25rem; /* Añade un pequeño espacio entre los botones */
+}
+
+#windowLevelControls .d-flex .btn {
+  flex: 1; /* Hace que cada botón ocupe una parte igual del espacio disponible */
+  white-space: nowrap; /* Evita que el texto del botón se parta en dos líneas */
+}
+
+#curve-editor-wrapper {
+  width: 100%;
+  border: 1px solid var(--gris-fuerte);
+  border-radius: 0.25rem;
+  position: relative;
+  background-color: var(--gris-oscuro);
+  aspect-ratio: 1.25 / 1; /* <--- VALOR AJUSTADO PARA HACERLO MÁS GRANDE */
+}
+
+/* Oculta las flechas (spinners) de los campos numéricos en todos los navegadores */
+.custom-spinner input[type='number']::-webkit-inner-spin-button,
+.custom-spinner input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.custom-spinner input[type='number'] {
+  -moz-appearance: textfield; /* Para Firefox */
+}
+
+/* Ajuste para que los botones no sean tan anchos */
+.custom-spinner .btn {
+  padding: 0.25rem 0.5rem;
+  line-height: 1.5;
+}
+
+/* Corrección para hacer visibles los botones '+' y '-' del spinner personalizado */
+.custom-spinner .btn.btn-outline-secondary {
+  color: var(--gris-claro); /* Cambia el color del texto a claro */
+  border-color: var(--gris-medio); /* Cambia el color del borde a uno más visible */
+}
+
+/* Mejora el efecto hover para que sea más notorio */
+.custom-spinner .btn.btn-outline-secondary:hover {
+  background-color: var(--gris-fuerte);
+  color: white;
 }

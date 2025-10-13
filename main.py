@@ -311,6 +311,23 @@ def process_selected_dicom():
     user_data.pop('vtk_panel_column', None) # Limpia el panel 3D para la nueva selección
     return jsonify({"mensaje": "Ok"})
 
+# ===== INICIO: CÓDIGO AÑADIDO PARA EL HISTOGRAMA =====
+@app.route('/get_histogram')
+def get_histogram():
+    user_data = get_user_data()
+    image = user_data.get('Image')
+    if image is None:
+        return jsonify({"error": "No hay imagen cargada"}), 404
+    try:
+        pixel_data = image.flatten()
+        min_hu, max_hu = -1024, 3071
+        pixel_data = pixel_data[(pixel_data >= min_hu) & (pixel_data <= max_hu)]
+        counts, bin_edges = np.histogram(pixel_data, bins=256, range=[min_hu, max_hu])
+        return jsonify({"counts": counts.tolist(), "bin_edges": bin_edges.tolist()})
+    except Exception as e:
+        return jsonify({"error": f"No se pudo calcular el histograma: {e}"}), 500
+# ===== FIN: CÓDIGO AÑADIDO PARA EL HISTOGRAMA =====
+
 @app.route("/render/<render>")
 def render(render):
     """Muestra la página principal del visor con los 4 cuadrantes."""
