@@ -138,7 +138,6 @@
             <button id="presetBtnSoftTissue" class="btn btn-sm btn-outline-light">Tejido</button>
         </div>
       </div>
-<<<<<<< HEAD
       
       <button id="contrastEditorBtn" class="btn btn-secondary w-100 mb-2"
               data-bs-toggle="tooltip" data-bs-placement="right" title="Ajuste de contraste basado en curva.">
@@ -193,8 +192,6 @@
       </div>
       
       <button id="huToggle" style="display: none;">Activar Selector HU</button>
-=======
->>>>>>> origin/LuisLozano
     </div>
 
     <div id="quadrant-grid-wrapper">
@@ -217,15 +214,9 @@
                   <input type="range" id="slider_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-range">
                   <input type="number" id="number_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-control form-control-sm" style="width: 70px;">
                 </div>
-<<<<<<< HEAD
                 <div class="image-wrapper mt-1">
                   <canvas id="canvas_{{ view }}" class="rounded"></canvas>
                   <canvas id="overlay_{{ view }}" style="pointer-events:none;"></canvas>
-=======
-                <div class="image-wrapper mt-1 flex-grow-1">
-                  <img id="image_{{ view }}" src="/image/{{ view }}/{{ max_val // 2 }}" class="rounded" alt="{{ view }}" />
-                  <canvas id="overlay_{{ view }}"></canvas>
->>>>>>> origin/LuisLozano
                 </div>
                 {% else %}
                 <div class="iframe-wrapper mt-1 flex-grow-1">

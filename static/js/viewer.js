@@ -47,6 +47,11 @@ document.addEventListener('DOMContentLoaded', function() {
         baseImages: { axial: null, sagital: null, coronal: null },
         huMode: false,
     };
+    const zoomState = {
+        axial:   { scale: 1, panX: 0, panY: 0, isDragging: false },
+        sagital: { scale: 1, panX: 0, panY: 0, isDragging: false },
+        coronal: { scale: 1, panX: 0, panY: 0, isDragging: false }
+    };
 
     // --- ESTADO DEL EDITOR DE CONTRASTE ---
     const contrastState = {
@@ -451,17 +456,47 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     function cssToPngPixels(canvasEl, evt) {
+        // 1. Obtenemos el rectángulo TOTAL del elemento (incluye las zonas negras)
         const rect = canvasEl.getBoundingClientRect();
-        const scaleX = canvasEl.width / rect.width;
-        const scaleY = canvasEl.height / rect.height;
-        const cssX = evt.clientX - rect.left;
-        const cssY = evt.clientY - rect.top;
-        if (cssX < 0 || cssY < 0 || cssX > rect.width || cssY > rect.height) return null;
+        
+        // 2. Dimensiones internas reales de la imagen (resolución original, ej. 512x512)
+        const internalW = canvasEl.width;
+        const internalH = canvasEl.height;
+        
+        // 3. Calculamos el factor de escala real ("object-fit: contain")
+        // El navegador usa la escala más pequeña para que quepa todo
+        const scaleX = rect.width / internalW;
+        const scaleY = rect.height / internalH;
+        const scale = Math.min(scaleX, scaleY);
+        
+        // 4. Calculamos el tamaño VISUAL de la imagen real (sin barras negras)
+        const activeW = internalW * scale;
+        const activeH = internalH * scale;
+        
+        // 5. Calculamos el tamaño de las "barras negras" (offsets)
+        // Si la imagen está centrada, el offset es la mitad del espacio sobrante
+        const offsetX = (rect.width - activeW) / 2;
+        const offsetY = (rect.height - activeH) / 2;
+
+        // 6. Calculamos el clic relativo SOLO a la imagen visible
+        // Restamos la posición del canvas Y el borde negro
+        const visualClickX = (evt.clientX - rect.left) - offsetX;
+        const visualClickY = (evt.clientY - rect.top) - offsetY;
+
+        // 7. Convertimos a píxeles internos
+        const xPix = Math.floor(visualClickX / scale);
+        const yPix = Math.floor(visualClickY / scale);
+
+        // 8. Validamos que el clic esté realmente DENTRO de la imagen y no en lo negro
+        if (xPix < 0 || yPix < 0 || xPix >= internalW || yPix >= internalH) return null;
+
         return {
-            xPix: Math.floor(cssX * scaleX),
-            yPix: Math.floor(cssY * scaleY),
-            cssX: cssX,
-            cssY: cssY,
+            xPix: xPix,
+            yPix: yPix,
+            // Para dibujar, usamos la coordenada interna. Como el Overlay
+            // tiene el mismo "object-fit" que la imagen, se alineará solo.
+            cssX: xPix, 
+            cssY: yPix
         };
     }
 
@@ -469,14 +504,27 @@ document.addEventListener('DOMContentLoaded', function() {
         const overlay = document.getElementById(`overlay_${view}`);
         const mainCanvas = document.getElementById(`canvas_${view}`);
         if (!overlay || !mainCanvas) return;
-        overlay.width = mainCanvas.clientWidth;
-        overlay.height = mainCanvas.clientHeight;
+        
+        // Sincronizamos tamaño interno
+        overlay.width = mainCanvas.width;
+        overlay.height = mainCanvas.height;
+        
         const ctx = overlay.getContext("2d");
         ctx.clearRect(0, 0, overlay.width, overlay.height);
-        ctx.fillStyle = "red";
+        
+        // Ajuste de grosor para que se vea bien con zoom
+        const currentScale = zoomState[view] ? zoomState[view].scale : 1;
+        
+        ctx.fillStyle = "#FFD700"; 
+        ctx.strokeStyle = "red";
+        ctx.lineWidth = 2 / currentScale; 
+
         ctx.beginPath();
-        ctx.arc(cssX, cssY, 5, 0, 2 * Math.PI);
+        // Dibujamos en la coordenada interna. El CSS del navegador se encarga
+        // de estirarlo y moverlo exactamente igual que la imagen de fondo.
+        ctx.arc(cssX, cssY, 5 / currentScale, 0, 2 * Math.PI);
         ctx.fill();
+        ctx.stroke();
     }
     
     function clearOverlay(view) {
@@ -489,17 +537,25 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function bindHU(view) {
         const mainCanvas = document.getElementById(`canvas_${view}`);
-        if (!mainCanvas) return;
-        mainCanvas.addEventListener("click", (evt) => {
-            if (!viewState.huMode) return;
+        const wrapper = document.getElementById(`card_${view}`).querySelector('.image-wrapper');
+        
+        if (!wrapper) return;
+        
+        wrapper.addEventListener("click", (evt) => {
+            // Si estábamos arrastrando (pan), no dispares el HU
+            // (Aunque desactivamos el arrastre manual, esto es buena seguridad)
+            if (!viewState.huMode || (zoomState[view] && zoomState[view].isDragging)) return;
+            
             VIEWS.forEach(clearOverlay);
-            const mapped = cssToPngPixels(mainCanvas, evt);
-            if (!mapped) {
-                huResult.textContent = "Clic fuera de la imagen.";
-                return;
-            }
+            
+            // --- AQUÍ ESTÁ EL CAMBIO: Pasamos 'view' como tercer argumento ---
+            const mapped = cssToPngPixels(mainCanvas, evt); 
+            
+            if (!mapped) return; // Clic fuera
+
             const slider = document.getElementById(`slider_${view}`);
             const idx = parseInt(slider.value, 10);
+            
             fetch(`/hu_value?view=${view}&x=${mapped.xPix}&y=${mapped.yPix}&index=${idx}`)
                 .then(r => r.json())
                 .then(data => {
@@ -602,6 +658,62 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // --- LÓGICA DE ZOOM (SIN ARRASTRE MANUAL) ---
+    function setupZoomPan(view) {
+        const wrapper = document.getElementById(`card_${view}`).querySelector('.image-wrapper');
+        const canvas = document.getElementById(`canvas_${view}`);
+        const overlay = document.getElementById(`overlay_${view}`);
+        
+        if (!wrapper || !canvas || !overlay) return;
+
+        const updateTransform = () => {
+            const zs = zoomState[view];
+            // Aplicamos el transform. Nota: panX/panY ahora solo se usan para compensar
+            // el zoom hacia el mouse, no para arrastrar la imagen.
+            const transform = `translate(${zs.panX}px, ${zs.panY}px) scale(${zs.scale})`;
+            
+            canvas.style.transform = transform;
+            canvas.style.transformOrigin = '0 0'; 
+            overlay.style.transform = transform;
+            overlay.style.transformOrigin = '0 0';
+        };
+
+        // SOLO EVENTO DE RUEDA (ZOOM)
+        wrapper.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zs = zoomState[view];
+            const zoomIntensity = 0.1;
+            const delta = e.deltaY < 0 ? 1 : -1;
+            
+            // Limitamos el zoom entre 1x (original) y 10x
+            const newScale = Math.min(Math.max(1, zs.scale + (delta * zoomIntensity)), 10);
+
+            // Cálculo para hacer zoom hacia donde apunta el mouse
+            const rect = wrapper.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            if (newScale === 1) {
+                // Si volvemos al tamaño original, centramos todo
+                zs.panX = 0;
+                zs.panY = 0;
+            } else {
+                // Ajustamos la posición para que el zoom se sienta natural hacia el puntero
+                zs.panX = mouseX - (mouseX - zs.panX) * (newScale / zs.scale);
+                zs.panY = mouseY - (mouseY - zs.panY) * (newScale / zs.scale);
+            }
+            
+            zs.scale = newScale;
+            updateTransform();
+        });
+
+        // Reset con doble clic
+        wrapper.addEventListener('dblclick', () => {
+            zoomState[view] = { scale: 1, panX: 0, panY: 0, isDragging: false };
+            updateTransform();
+        });
+    }
+
     // --- INICIALIZACIÓN ---
     // Configura los spinners personalizados con sus funciones de actualización inmediata.
     setupCustomSpinner('minInput', 1, () => {
@@ -632,6 +744,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const slider = document.getElementById(`slider_${view}`);
         if (slider) {
             setupSliceSlider(view);
+            setupZoomPan(view); 
             bindHU(view);
             updateImage(view, slider.value, true);
         }
