@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function() {
-
+    // --- ESTADO GLOBAL Y CONFIGURACIÓN ---
     const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
     [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
 
@@ -567,6 +567,41 @@ document.addEventListener('DOMContentLoaded', function() {
     }); 
   }
 
+    // --- LÓGICA DE CAMBIO DE RENDERIZADO 3D  ---
+    function setup3DRendererControls() {
+        const renderModeRadios = document.querySelectorAll('input[name="renderMode"]');
+        const iframe = document.getElementById('DicomRender');
+        if (!iframe || renderModeRadios.length === 0) return;
+
+        renderModeRadios.forEach(radio => {
+            radio.addEventListener('change', function() {
+                // Efecto visual de carga
+                iframe.style.opacity = '0.5'; 
+                const token = document.querySelector('meta[name="csrf-token"]').content;
+                
+                fetch('/update_render_mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+                    body: JSON.stringify({ mode: this.value })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if(data.status === 'success') { 
+                        // Truco para recargar el iframe forzando actualización
+                        iframe.src = iframe.src.split('?')[0] + '?t=' + new Date().getTime(); 
+                    } else { 
+                        alert('Error al cambiar el modo.'); 
+                    }
+                })
+                .catch(error => console.error("Error:", error))
+                .finally(() => {
+                     // Restaurar opacidad cuando termine (o cuando cargue el iframe)
+                     setTimeout(() => { iframe.style.opacity = '1'; }, 1000);
+                });
+            });
+        });
+    }
+
     // --- INICIALIZACIÓN ---
     // Configura los spinners personalizados con sus funciones de actualización inmediata.
     setupCustomSpinner('minInput', 1, () => {
@@ -589,6 +624,9 @@ document.addEventListener('DOMContentLoaded', function() {
         contrastState.cutoff = parseFloat(cutoffInput.value) || 0;
         drawCurveAndHistogram();
     });
+    setup3DRendererControls();
+
+    // Inicializa los sliders de corte y carga las imágenes iniciales.
 
     VIEWS.forEach(view => {
         const slider = document.getElementById(`slider_${view}`);

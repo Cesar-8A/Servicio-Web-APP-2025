@@ -93,58 +93,92 @@ def start_bokeh_server(panel_layout):
 
 # --- 5. LÓGICA DE VISUALIZACIÓN Y PROCESAMIENTO DICOM ---
 
-def create_render(user_data):
-    """Crea el panel de visualización 3D inicial con el hueso y la piel."""
-    panel_column = pn.Column()
-    dicom_image = user_data.get('Image', np.array([]))
-    if dicom_image.size == 0: return None
+def create_or_get_plotter(user_data):
+    """
+    Inicializa el plotter de PyVista y el layout de Panel si no existen.
+    Devuelve el layout de Panel para ser servido por Bokeh.
+    """
+    if 'vtk_panel_column' in user_data:
+        return user_data['vtk_panel_column']
 
-    # Segmentación simple por rangos de HU para hueso y piel
-    volume_bone = ((dicom_image > 175) * 1).astype(np.int16)
-    volume_skin = (((dicom_image > -200) & (dicom_image < 0)) * 1).astype(np.int16)
-    unique_id = user_data.get("unique_id")
-    series_info = user_data.get('dicom_series', {}).get(unique_id, {})
-    if not series_info: return None
-    
-    # Extrae metadatos espaciales para construir la malla 3D correctamente
-    origin = series_info.get("ImagePositionPatient")
-    spacing_xy = series_info.get("PixelSpacing", [1, 1])
-    spacing_z = series_info.get("SliceThickness", 1)
-    spacing = (spacing_z, spacing_xy[0], spacing_xy[1])
-
-    # Creación de la malla 3D para el hueso
-    grid_bone = pv.ImageData(dimensions=np.array(volume_bone.shape) + 1, origin=origin, spacing=spacing)
-    grid_bone.cell_data["values"] = volume_bone.flatten(order="F")
-    grid_bone = grid_bone.cell_data_to_point_data() # Conversión necesaria para el filtro de contorno
-    surface_bone = grid_bone.contour([0.5])
-
-    # Creación de la malla 3D para la piel
-    grid_skin = pv.ImageData(dimensions=np.array(volume_skin.shape) + 1, origin=origin, spacing=spacing)
-    grid_skin.cell_data["values"] = volume_skin.flatten(order="F")
-    grid_skin = grid_skin.cell_data_to_point_data() # Conversión necesaria
-    surface_skin = grid_skin.contour([0.5])
-    
-    user_data['grid_dicom'] = grid_skin
-    
-    # Configuración del plotter de PyVista
+    # Configuración inicial del plotter y del panel
     plotter = pv.Plotter(off_screen=True)
     plotter.set_background("black")
-    plotter.add_mesh(surface_bone, color="white", smooth_shading=True)
-    skin_actor = plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, name="skin", smooth_shading=True)
-    plotter.view_isometric()
     
-    # Creación de los componentes de la interfaz de Panel (slider, etc.)
-    panel_vtk = pn.pane.VTK(plotter.ren_win, width=400, height=500)
-    slider = pn.widgets.FloatSlider(name="Opacidad de la piel", start=0.0, end=1.0, step=0.05, value=0.5)
-    def update_opacity(event):
-        skin_actor.GetProperty().SetOpacity(event.new)
-        panel_vtk.param.trigger('object')
-    slider.param.watch(update_opacity, 'value')
-    panel_column[:] = [panel_vtk, slider]
+    panel_vtk = pn.pane.VTK(plotter.ren_win, width=400, height=500, name='vtk_pane')
     
-    # Guardar los objetos VTK/Panel en la sesión del usuario para futuras interacciones
-    user_data.update({'vtk_plotter': plotter, 'vtk_panel_column': panel_column, 'vtk_panel': panel_vtk, 'vtk_skin_actor': skin_actor, 'vtk_slider': slider})
+    # Creamos el layout principal que contendrá el visor y sus controles
+    panel_column = pn.Column(panel_vtk)
+    
+    # Guardamos los componentes clave en la sesión del usuario para futuras actualizaciones
+    user_data.update({
+        'vtk_plotter': plotter,
+        'vtk_panel': panel_vtk,
+        'vtk_panel_column': panel_column
+    })
+    
+    # Aplicamos el renderizado por defecto (o el último seleccionado)
+    initial_mode = user_data.get('render_mode', 'isosurface') # Isosurface por defecto
+    update_3d_render(user_data, mode=initial_mode)
+    
     return panel_column
+
+def update_3d_render(user_data, mode='isosurface', options=None):
+    """
+    Limpia el plotter y aplica un nuevo modo de renderizado (isosurface, mip, volume).
+    Esta función es la que hace todo el trabajo de visualización 3D.
+    """
+    plotter = user_data.get('vtk_plotter')
+    dicom_image = user_data.get('Image')
+    
+    if not plotter or dicom_image is None or dicom_image.size == 0:
+        return
+
+    # Limpiamos todos los actores (mallas, volúmenes) anteriores del plotter
+    plotter.clear_actors()
+    
+    # Reconstruimos la malla base del DICOM (grid) si no existe
+    if 'grid_dicom' not in user_data:
+        series_info = user_data.get('dicom_series', {}).get(user_data.get("unique_id"), {})
+        if not series_info: return
+        
+        origin = series_info.get("ImagePositionPatient")
+        spacing_xy = series_info.get("PixelSpacing", [1, 1])
+        spacing_z = series_info.get("SliceThickness", 1)
+        spacing = (spacing_z, spacing_xy[0], spacing_xy[1])
+        
+        grid = pv.ImageData(dimensions=np.array(dicom_image.shape) + 1, origin=origin, spacing=spacing)
+        grid.cell_data["values"] = dicom_image.flatten(order="F")
+        grid = grid.cell_data_to_point_data()
+        user_data['grid_dicom'] = grid
+    
+    grid = user_data['grid_dicom']
+
+    # --- Lógica de Renderizado Dinámico ---
+    if mode == 'isosurface':
+        # MODO ISOSUPERFICIE
+        surface_bone = grid.contour([250])
+        plotter.add_mesh(surface_bone, color="white", smooth_shading=True)
+        surface_skin = grid.contour([-300])
+        plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.4, smooth_shading=True, name="skin")
+
+    elif mode == 'mip':
+        # MODO MIP (Maximum Intensity Projection)
+        # ===> LA CORRECCIÓN ESTÁ AQUÍ <===
+        plotter.add_volume(grid, cmap='bone', render_style='mip')
+
+    elif mode == 'volume':
+        # MODO VOLUME RENDERING
+        opacity_map = [0, 0, 0.2, 0.4, 0.8]
+        plotter.add_volume(grid, cmap='bone', opacity=opacity_map, shade=True)
+
+    plotter.view_isometric()
+    plotter.render()
+    
+    # Actualiza el panel para que muestre los cambios
+    user_data['vtk_panel'].object = plotter.ren_win
+    user_data.get('vtk_panel').param.trigger('object')
+
 
 def add_RT_to_plotter(user_data):
     """Añade una malla de segmentación (RT Struct) al plotter 3D existente."""
@@ -158,6 +192,7 @@ def add_RT_to_plotter(user_data):
 
         # Procesa la imagen RT
         rt_image = np.flip(user_data['RT'], axis=(0, 2)).transpose(2, 0, 1)
+        user_data['RT_aligned'] = np.flip(user_data['RT'], axis=(0, 2))
         rt_grid = pv.wrap(rt_image)
         surface = rt_grid.contour([0.5])
         
@@ -309,6 +344,7 @@ def process_selected_dicom():
         "scale_axial": s_ax, "scale_coronal": s_co, "scale_sagittal": s_sa
     })
     user_data.pop('vtk_panel_column', None) # Limpia el panel 3D para la nueva selección
+    user_data.pop('grid_dicom', None)       # Limpia la malla 3D para que se recalcule
     return jsonify({"mensaje": "Ok"})
 
 @app.route('/get_histogram')
@@ -338,6 +374,7 @@ def get_histogram():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+# Reemplaza la función incorrecta con esta versión final en main.py
 
 @app.route("/render/<render>")
 def render(render): 
@@ -347,17 +384,43 @@ def render(render):
     if image is None or image.size == 0:
         return render_template("render.html", success=0)
     
-    panel_layout = user_data.get('vtk_panel_column')
-    if panel_layout is None:
-        panel_layout = create_render(user_data)
-        if panel_layout: start_bokeh_server(panel_layout)
+    # Obtiene o crea el plotter y el layout de panel
+    panel_layout = create_or_get_plotter(user_data)
+    
+    # Inicia el servidor de Bokeh si es la primera vez
+    if panel_layout:
+        start_bokeh_server(panel_layout)
         
     dims = user_data.get("dims", (1, 1, 1))
     # Pasamos la variable 'render' a la plantilla
+    current_mode = user_data.get('render_mode', 'isosurface')
+
+    # El cambio clave está aquí: 'render=render_type' se convierte en 'render=render'
     return render_template("render.html", success=1, render=render,
                            max_value_axial=dims[0] - 1,
                            max_value_coronal=dims[1] - 1,
-                           max_value_sagital=dims[2] - 1)
+                           max_value_sagital=dims[2] - 1,
+                           current_render_mode=current_mode)
+
+@app.route('/update_render_mode', methods=['POST'])
+def update_render_mode():
+    """
+    Recibe una solicitud para cambiar el modo de renderizado 3D y lo aplica.
+    """
+    user_data = get_user_data()
+    new_mode = request.json.get('mode')
+    
+    if not new_mode or 'vtk_plotter' not in user_data:
+        return jsonify({"status": "error", "message": "Datos inválidos o plotter no inicializado."}), 400
+
+    # Llama a la función de actualización
+    update_3d_render(user_data, mode=new_mode)
+    
+    # Guarda la elección del usuario para la próxima vez que cargue la página
+    user_data['render_mode'] = new_mode
+    
+    return jsonify({"status": "success", "message": f"Renderizado cambiado a {new_mode}"})
+
 
 @app.route('/image/<view>/<int:layer>')
 def get_image(view, layer):
@@ -474,7 +537,6 @@ def exportar_dicom():
                 dicom_data = pydicom.dcmread(archivo)
                 for campo, valor in user_data['dicom_series'][unique_id]['Anonimize'].items():
                     if hasattr(dicom_data, campo):
-                        # Asignar el valor. Necesita el tipo correcto, no siempre string.
                         data_element = dicom_data.data_element(campo)
                         if data_element:
                             data_element.value = valor
@@ -485,7 +547,7 @@ def exportar_dicom():
             for f in os.listdir(out_dir): zipf.write(os.path.join(out_dir, f), f)
         return send_file(zip_path, as_attachment=True, download_name='archivos_anonimizados.zip')
 
-# --- 7. RUTAS DE LOGIN Y REGISTRO (SIN CAMBIOS) ---
+# --- 7. RUTAS DE LOGIN Y REGISTRO ---
 class LoginForm(FlaskForm):
     username = StringField('Usuario', validators=[InputRequired(), Length(min=4, max=15)])
     password = PasswordField('Contraseña', validators=[InputRequired(), Length(min=4, max=20)])
