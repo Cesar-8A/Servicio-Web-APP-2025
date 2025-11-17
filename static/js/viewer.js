@@ -518,23 +518,54 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- LÓGICA DEL FORMULARIO RT STRUCT ---
     const rtStructForm = document.getElementById('rtStructForm');
-    if (rtStructForm) {
-        rtStructForm.addEventListener("submit", function (event) {
-            event.preventDefault();
-            let formData = new FormData(this);
-            fetch("/upload_RT", {
-                method: "POST",
-                body: formData
-            }).then(response => {
-                if (response.ok) {
-                    alert("Archivo RT Struct cargado. Las imágenes se actualizarán.");
-                    VIEWS.forEach(view => updateImage(view, document.getElementById(`slider_${view}`)?.value, true));
-                } else {
-                    alert("Error al cargar el archivo.");
-                }
-            });
+  if (rtStructForm) { 
+    rtStructForm.addEventListener("submit", function (event) { 
+        event.preventDefault(); 
+        let formData = new FormData(this); 
+        const token = document.querySelector('meta[name="csrf-token"]').content;
+        const loader = document.getElementById('loader-wrapper');
+
+        // 1. Muestra la pantalla de carga
+        if (loader) {
+            loader.style.display = 'flex';
+            loader.style.opacity = '1';
+        }
+        
+        fetch("/upload_RT", { 
+            method: "POST", 
+            headers: { 'X-CSRFToken': token }, 
+            body: formData 
+        })
+        .then(response => {
+            if (!response.ok) {
+                // Si el servidor responde con un error, lo mostramos
+                throw new Error('Error en la respuesta del servidor al subir el archivo.');
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log("Respuesta del servidor:", data.mensaje);
+            // 2. NO HACEMOS NADA para recargar el iframe.
+            // Confiamos en que el backend envíe la actualización a través de WebSocket.
+        })
+        .catch(error => {
+            console.error("Error al cargar el archivo RT Struct:", error);
+            alert("Hubo un error al cargar el archivo.");
+        })
+        .finally(() => {
+            // 3. Oculta la pantalla de carga después de un momento.
+            // Le damos tiempo al backend para que envíe la actualización visual.
+            if (loader) {
+                setTimeout(() => {
+                    loader.style.opacity = '0';
+                    setTimeout(() => {
+                        loader.style.display = 'none';
+                    }, 500);
+                }, 1000); // Espera 1 segundo antes de ocultar
+            }
         });
-    }
+    }); 
+  }
 
     // --- INICIALIZACIÓN ---
     // Configura los spinners personalizados con sus funciones de actualización inmediata.
@@ -593,6 +624,8 @@ document.addEventListener('DOMContentLoaded', function() {
 function toggleFullscreen(id) {
     const element = document.getElementById(id);
     if (!element) return;
+
+    // --- PUNTO CLAVE 4: Usa una clase CSS en lugar de la API nativa ---
     if (element.classList.contains('fullscreen-active')) {
         element.classList.remove('fullscreen-active');
     } else {

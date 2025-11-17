@@ -148,30 +148,30 @@ def create_render(user_data):
 
 def add_RT_to_plotter(user_data):
     """Añade una malla de segmentación (RT Struct) al plotter 3D existente."""
-    plotter, panel_vtk, skin_actor, panel_column, grid_dicom = (user_data.get(k) for k in ['vtk_plotter', 'vtk_panel', 'vtk_skin_actor', 'vtk_panel_column', 'grid_dicom'])
-    if not all([plotter, panel_vtk, skin_actor, panel_column, grid_dicom]): return None
-    
-    # Procesa y alinea la imagen RT
-    RT_Image = np.flip(user_data['RT'], axis=(0, 2)).transpose(2, 0, 1)
-    user_data['RT_aligned'] = np.flip(user_data['RT'], axis=(0, 2))
+    try:
+        # Recupera los objetos correctos que guardó create_render
+        plotter = user_data.get('vtk_plotter')
+        panel_vtk = user_data.get('vtk_panel')
+        if not all([plotter, panel_vtk]): 
+            print("Error: El plotter 3D o el panel no se encontraron en la sesión.")
+            return
 
-    # Crea la malla 3D para la segmentación
-    rt_grid = pv.ImageData(dimensions=np.array(RT_Image.shape) + 1, origin=grid_dicom.origin, spacing=grid_dicom.spacing)
-    rt_grid.cell_data["values"] = (RT_Image > 1).astype(np.uint8).flatten(order="F")
-    rt_grid = rt_grid.cell_data_to_point_data()
-    surface = rt_grid.contour([0.5])
-    mask_actor = plotter.add_mesh(surface, color="red", opacity=0.5, smooth_shading=True)
-    
-    # Añade un botón para mostrar/ocultar la máscara
-    toggle_button = pn.widgets.Toggle(name='Mostrar/Ocultar máscara', button_type='danger', value=True)
-    def toggle_mask_visibility(event):
-        mask_actor.GetProperty().SetOpacity(0.5 if event.new else 0.0)
-    toggle_button.param.watch(toggle_mask_visibility, 'value')
+        # Procesa la imagen RT
+        rt_image = np.flip(user_data['RT'], axis=(0, 2)).transpose(2, 0, 1)
+        rt_grid = pv.wrap(rt_image)
+        surface = rt_grid.contour([0.5])
+        
+        # Añade la nueva malla al plotter que ya existe en la sesión
+        plotter.add_mesh(surface, color="red", opacity=0.5, name="rt_struct", smooth_shading=True)
+        
+        # ---> PUNTO CLAVE <---
+        # Esta es la línea que le dice a Panel/Bokeh que la escena ha cambiado
+        # y que debe enviar una actualización al frontend a través de WebSocket.
+        panel_vtk.param.trigger('object')
+        print("RT Struct añadido y actualización de la vista activada.")
 
-    plotter.render()
-    panel_vtk.object = plotter.ren_win
-    panel_column.append(toggle_button)
-    return panel_column
+    except Exception as e:
+        print(f"Error en add_RT_to_plotter: {e}")
 
 def _extract_spacing_for_series(unique_id, user_data):
     """Calcula el espaciado entre píxeles (dx, dy, dz) de forma robusta."""
@@ -311,25 +311,36 @@ def process_selected_dicom():
     user_data.pop('vtk_panel_column', None) # Limpia el panel 3D para la nueva selección
     return jsonify({"mensaje": "Ok"})
 
-# ===== INICIO: CÓDIGO AÑADIDO PARA EL HISTOGRAMA =====
 @app.route('/get_histogram')
 def get_histogram():
+    """Calcula y devuelve los datos del histograma para la imagen cargada."""
     user_data = get_user_data()
-    image = user_data.get('Image')
+    image = user_data.get('Image') # Usamos la imagen en HU
     if image is None:
         return jsonify({"error": "No hay imagen cargada"}), 404
+
     try:
+        # Usamos la imagen completa para el histograma
         pixel_data = image.flatten()
+        
+        # Limita el rango para enfocarse en valores clínicamente relevantes y mejorar el rendimiento
+        # Puedes ajustar estos valores si trabajas con rangos de HU muy específicos
         min_hu, max_hu = -1024, 3071
         pixel_data = pixel_data[(pixel_data >= min_hu) & (pixel_data <= max_hu)]
+
+        # Calcula el histograma con NumPy
         counts, bin_edges = np.histogram(pixel_data, bins=256, range=[min_hu, max_hu])
-        return jsonify({"counts": counts.tolist(), "bin_edges": bin_edges.tolist()})
+
+        # Devuelve los datos listos para ser usados en el frontend
+        return jsonify({
+            "counts": counts.tolist(),
+            "bin_edges": bin_edges.tolist()
+        })
     except Exception as e:
-        return jsonify({"error": f"No se pudo calcular el histograma: {e}"}), 500
-# ===== FIN: CÓDIGO AÑADIDO PARA EL HISTOGRAMA =====
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/render/<render>")
-def render(render):
+def render(render): 
     """Muestra la página principal del visor con los 4 cuadrantes."""
     user_data = get_user_data()
     image = user_data.get('Image')
@@ -342,6 +353,7 @@ def render(render):
         if panel_layout: start_bokeh_server(panel_layout)
         
     dims = user_data.get("dims", (1, 1, 1))
+    # Pasamos la variable 'render' a la plantilla
     return render_template("render.html", success=1, render=render,
                            max_value_axial=dims[0] - 1,
                            max_value_coronal=dims[1] - 1,
@@ -371,7 +383,7 @@ def get_image(view, layer):
     else:
         image_scaled = np.zeros_like(image_scaled)
     image_8bit = image_scaled.astype(np.uint8)
-    
+
     # Dibuja la imagen con Matplotlib
     dpi = 100.0
     fig, ax = plt.subplots(figsize=(w_px / dpi, h_px / dpi), dpi=dpi)
