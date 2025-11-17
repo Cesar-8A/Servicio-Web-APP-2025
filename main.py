@@ -95,89 +95,95 @@ def start_bokeh_server(panel_layout):
 
 def create_or_get_plotter(user_data):
     """
-    Inicializa el plotter de PyVista y el layout de Panel si no existen.
-    Devuelve el layout de Panel para ser servido por Bokeh.
+    Inicializa el plotter, procesa el volumen 3D y configura el panel.
     """
     if 'vtk_panel_column' in user_data:
         return user_data['vtk_panel_column']
 
-    # Configuración inicial del plotter y del panel
+    # --- 1. CREAR EL GRID (VOLUMEN 3D) ---
+    # Recuperamos la imagen procesada (HU)
+    dicom_image = user_data.get('Image', np.array([]))
+    if dicom_image.size == 0: return None
+
+    # Recuperamos metadatos espaciales para que no se vea aplastado
+    unique_id = user_data.get("unique_id")
+    series_info = user_data.get('dicom_series', {}).get(unique_id, {})
+    
+    # Valores por defecto seguros
+    origin = series_info.get("ImagePositionPatient", [0,0,0])
+    spacing_xy = series_info.get("PixelSpacing", [1, 1])
+    spacing_z = series_info.get("SliceThickness", 1)
+    spacing = (spacing_z, spacing_xy[0], spacing_xy[1])
+
+    # Creamos el objeto PyVista (ImageData) con el volumen completo
+    grid_full = pv.ImageData(dimensions=np.array(dicom_image.shape) + 1, origin=origin, spacing=spacing)
+    grid_full.cell_data["values"] = dicom_image.flatten(order="F")
+    grid_full = grid_full.cell_data_to_point_data() # Necesario para contornos y volumen
+    
+    # GUARDAMOS EL GRID EN LA SESIÓN
+    user_data['grid_full'] = grid_full
+    # -------------------------------------
+
+    # Configuración inicial del plotter
     plotter = pv.Plotter(off_screen=True)
     plotter.set_background("black")
     
     panel_vtk = pn.pane.VTK(plotter.ren_win, width=400, height=500, name='vtk_pane')
-    
-    # Creamos el layout principal que contendrá el visor y sus controles
     panel_column = pn.Column(panel_vtk)
     
-    # Guardamos los componentes clave en la sesión del usuario para futuras actualizaciones
+    # Guardamos los componentes en la sesión
     user_data.update({
         'vtk_plotter': plotter,
         'vtk_panel': panel_vtk,
         'vtk_panel_column': panel_column
     })
     
-    # Aplicamos el renderizado por defecto (o el último seleccionado)
-    initial_mode = user_data.get('render_mode', 'isosurface') # Isosurface por defecto
+    # Aplicamos el renderizado inicial
+    initial_mode = user_data.get('render_mode', 'isosurface')
     update_3d_render(user_data, mode=initial_mode)
     
     return panel_column
 
-def update_3d_render(user_data, mode='isosurface', options=None):
-    """
-    Limpia el plotter y aplica un nuevo modo de renderizado (isosurface, mip, volume).
-    Esta función es la que hace todo el trabajo de visualización 3D.
-    """
+def update_3d_render(user_data, mode):
+    """Actualiza el renderizado 3D usando el volumen completo guardado."""
     plotter = user_data.get('vtk_plotter')
-    dicom_image = user_data.get('Image')
+    panel_vtk = user_data.get('vtk_panel')
     
-    if not plotter or dicom_image is None or dicom_image.size == 0:
+    # Recuperamos el grid completo que creamos arriba
+    grid = user_data.get('grid_full') 
+    
+    if not plotter or not panel_vtk or grid is None:
+        print("Error: No se encontró el volumen 3D (grid_full) para renderizar.")
         return
 
-    # Limpiamos todos los actores (mallas, volúmenes) anteriores del plotter
-    plotter.clear_actors()
-    
-    # Reconstruimos la malla base del DICOM (grid) si no existe
-    if 'grid_dicom' not in user_data:
-        series_info = user_data.get('dicom_series', {}).get(user_data.get("unique_id"), {})
-        if not series_info: return
-        
-        origin = series_info.get("ImagePositionPatient")
-        spacing_xy = series_info.get("PixelSpacing", [1, 1])
-        spacing_z = series_info.get("SliceThickness", 1)
-        spacing = (spacing_z, spacing_xy[0], spacing_xy[1])
-        
-        grid = pv.ImageData(dimensions=np.array(dicom_image.shape) + 1, origin=origin, spacing=spacing)
-        grid.cell_data["values"] = dicom_image.flatten(order="F")
-        grid = grid.cell_data_to_point_data()
-        user_data['grid_dicom'] = grid
-    
-    grid = user_data['grid_dicom']
+    # Limpiar la escena anterior
+    plotter.clear()
 
-    # --- Lógica de Renderizado Dinámico ---
+    # Dibujar según el modo
     if mode == 'isosurface':
-        # MODO ISOSUPERFICIE
-        surface_bone = grid.contour([250])
-        plotter.add_mesh(surface_bone, color="white", smooth_shading=True)
-        surface_skin = grid.contour([-300])
-        plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.4, smooth_shading=True, name="skin")
+        try:
+            # Umbrales aproximados: Hueso > 175, Piel entre -200 y 0
+            surface_bone = grid.contour([175]) 
+            surface_skin = grid.contour([-200]) 
+            
+            plotter.add_mesh(surface_bone, color="white", smooth_shading=True, name="bone")
+            plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, smooth_shading=True, name="skin")
+        except Exception as e:
+            print(f"Error en isosuperficie: {e}")
+            # Fallback si falla el contorno
+            plotter.add_volume(grid, cmap="bone", opacity="linear", blending="composite")
 
     elif mode == 'mip':
-        # MODO MIP (Maximum Intensity Projection)
-        # ===> LA CORRECCIÓN ESTÁ AQUÍ <===
-        plotter.add_volume(grid, cmap='bone', render_style='mip')
+        # Maximum Intensity Projection (Esqueleto brillante)
+        plotter.add_volume(grid, cmap="bone", opacity="linear", blending="maximum")
 
-    elif mode == 'volume':
-        # MODO VOLUME RENDERING
-        opacity_map = [0, 0, 0.2, 0.4, 0.8]
-        plotter.add_volume(grid, cmap='bone', opacity=opacity_map, shade=True)
+    else: # 'Volume Rendering'
+        # Renderizado volumétrico estándar (Transparente)
+        plotter.add_volume(grid, cmap="bone", opacity="linear", blending="composite")
 
+    # Ajustar cámara y actualizar
     plotter.view_isometric()
-    plotter.render()
-    
-    # Actualiza el panel para que muestre los cambios
-    user_data['vtk_panel'].object = plotter.ren_win
-    user_data.get('vtk_panel').param.trigger('object')
+    panel_vtk.param.trigger('object')
 
 
 def add_RT_to_plotter(user_data):
