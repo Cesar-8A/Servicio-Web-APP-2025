@@ -1,3 +1,6 @@
+/* =========================================
+   1. VARIABLES Y CONFIGURACIÓN BASE
+   ========================================= */
 :root {
     --rojo-UDG:     #AE1C28;
     --amarillo-UDG: #FFD700;
@@ -8,13 +11,29 @@
     --gris-claro:   #dfe0e4;
 }
 
-/* Pantalla de carga */
+body {
+    background-color: var(--gris-oscuro);
+    color: var(--gris-medio);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+h1, h2, h3, h4, h5 {
+    color: var(--gris-claro);
+    font-weight: bold;
+}
+
+/* Utilidades */
+.hidden { display: none !important; }
+.shadow-udg { box-shadow: 0 0 10px rgba(92, 91, 87, 0.4); }
+.borde-udg { padding-left: 15px; }
+
+/* =========================================
+   2. PANTALLA DE CARGA (LOADER)
+   ========================================= */
 #loader-wrapper {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
     background-color: var(--gris-oscuro);
     z-index: 9999;
     display: flex;
@@ -28,20 +47,18 @@
     border-top: 12px solid var(--rojo-UDG); 
     border-bottom: 12px solid var(--rojo-UDG); 
     border-radius: 50%;
-    width: 80px;
-    height: 80px;
+    width: 80px; height: 80px;
     animation: spin 1s linear infinite;
+}
+
+#loader-logo {
+    width: 100px; height: 100px;
+    animation: pulse 1.5s infinite ease-in-out;
 }
 
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
-}
-
-#loader-logo {
-    width: 100px;
-    height: 100px;
-    animation: pulse 1.5s infinite ease-in-out;
 }
 
 @keyframes pulse {
@@ -50,7 +67,9 @@
     100% { transform: scale(1); opacity: 1; }
 }
 
-/* Estilo para la barra de navegación */
+/* =========================================
+   3. BARRA DE NAVEGACIÓN (NAVBAR)
+   ========================================= */
 .navbar {
     background-color: var(--gris-oscuro);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
@@ -76,58 +95,39 @@
     color: var(--amarillo-UDG);
 }
 
-.navbar .nav-item.dropdown:hover .dropdown-menu {
-    background-color: var(--gris-fuerte);
-}
-
-.navbar .dropdown-menu {
-    background-color: var(--gris-oscuro);
-}
-
-.navbar .dropdown-item {
-    color: var(--gris-debil);
-}
-
+/* Dropdowns */
+.navbar .nav-item.dropdown:hover .dropdown-menu { background-color: var(--gris-fuerte); }
+.navbar .dropdown-menu { background-color: var(--gris-oscuro); }
+.navbar .dropdown-item { color: var(--gris-debil); }
 .navbar .dropdown-item:hover {
     background-color: var(--amarillo-UDG);
     color: var(--gris-oscuro);
 }
 
+/* Inputs y Botones en Navbar */
 .navbar .form-control {
     background-color: var(--gris-medio);
     border-radius: 5px;
     color: var(--gris-claro);
     border: 1px solid var(--gris-fuerte);
 }
-
 .navbar .form-control:focus {
     background-color: var(--gris-fuerte);
     color: var(--gris-claro);
     outline: none;
 }
-
 .navbar .btn-outline-light {
     color: var(--gris-debil);
     border-color: var(--gris-oscuro);
 }
-
 .navbar .btn-outline-light:hover {
     background-color: var(--amarillo-UDG);
     color: black;
 }
 
-/* Estilos generales */
-body {
-    background-color: var(--gris-oscuro);
-    color: var(--gris-medio);
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-}
-
-h1, h2, h3, h4, h5 {
-    color: var(--gris-claro);
-    font-weight: bold;
-}
-
+/* =========================================
+   4. COMPONENTES DE UI (Tarjetas y Botones)
+   ========================================= */
 .card {
     background-color: #38383e;
     color: var(--amarillo-UDG);
@@ -136,36 +136,7 @@ h1, h2, h3, h4, h5 {
     box-shadow: 0 0 12px rgba(0,0,0,0.4);
 }
 
-/* borde de acento en tarjetas importantes */
-.borde-udg {
-    padding-left: 15px;
-}
-
-/* Tablas */
-.table {
-    background-color: transparent;
-    color: var(--gris-debil);
-    border-collapse: separate;
-    border-spacing: 0 6px;
-}
-
-.table th {
-    background-color: var(--gris-fuerte);
-    color: var(--gris-claro);
-    font-weight: 600;
-    border-bottom: 1px solid var(--gris-medio);
-    padding: 12px 15px;
-}
-
-.table td {
-    background-color: #44444d;
-    border-radius: 6px;
-    color: var(--gris-claro);
-    border: none;
-    padding: 12px 15px;
-}
-
-/* Botones base */
+/* Botones Base */
 .btn {
     border-radius: 8px;
     padding: 0.5rem 1.2rem;
@@ -174,25 +145,24 @@ h1, h2, h3, h4, h5 {
     transition: background-color 0.3s ease;
     cursor: pointer;
 }
+.btn.rounded-circle {
+    box-shadow: none !important;
+    border: none !important;
+}
 
-/* Botones con estilo UDG */
+/* Variantes de Botones */
 .btn-udg-rojo {
     background-color: var(--rojo-UDG);
     color: white;
 }
-.btn-udg-rojo:hover {
-    background-color: #89171e;
-}
+.btn-udg-rojo:hover { background-color: #89171e; }
 
 .btn-udg-dorado {
     background-color: var(--amarillo-UDG);
     color: black;
 }
-.btn-udg-dorado:hover {
-    background-color: #e0c300;
-}
+.btn-udg-dorado:hover { background-color: #e0c300; }
 
-/* Botones existentes */
 .btn-danger {
     background-color: var(--gris-fuerte);
     color: var(--gris-claro);
@@ -206,23 +176,10 @@ h1, h2, h3, h4, h5 {
     background-color: #4a4a50;
     color: var(--gris-claro);
     border: 2px solid var(--gris-fuerte);
-    border-radius: 8px;
-    padding: 0.5rem 1.2rem;
-    font-weight: 500;
-    border: none;
-    transition: background-color 0.3s ease;
-    cursor: pointer;
 }
 .btn-secondary:hover {
     background-color: var(--gris-fuerte);
     color: var(--amarillo-UDG);
-    border: 2px solid var(--gris-fuerte);
-    border-radius: 8px;
-    padding: 0.5rem 1.2rem;
-    font-weight: 500;
-    border: none;
-    transition: background-color 0.3s ease;
-    cursor: pointer;
 }
 
 .btn-success {
@@ -234,170 +191,7 @@ h1, h2, h3, h4, h5 {
     color: var(--gris-oscuro);
 }
 
-.shadow-udg {
-    box-shadow: 0 0 10px rgba(92, 91, 87, 0.4);
-}
-
-.btn.rounded-circle {
-    box-shadow: none !important;
-    border: none !important;
-}
-
-.hidden {
-    display: none !important;
-}
-
-/* Estilo para el input de archivos */
-input[type="file"].form-control {
-    background-color: #3e3e44;
-    color: var(--gris-claro);
-    border: 2px solid var(--rojo-UDG);
-    border-right: none;
-    border-radius: 8px 0 0 8px;
-    padding: 0.6rem 1rem;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-    transition: border-color 0.3s ease, box-shadow 0.3s ease;
-}
-
-input[type="file"].form-control:hover {
-    border-color: var(--amarillo-UDG);
-    box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
-}
-
-input[type="file"].form-control::file-selector-button {
-    background-color: var(--rojo-UDG);
-    color: black;
-    padding: 0.4rem 0.8rem;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-}
-
-input[type="file"].form-control::file-selector-button:hover {
-    background-color: var(--amarillo-UDG);
-    color: black;
-}
-
-/* Estilo para el botón de subir */
-button#inputGroupFileAddon04 {
-    background-color: var(--amarillo-UDG);
-    color: #222;
-    border: 2px solid var(--amarillo-UDG);
-    border-radius: 0 8px 8px 0;
-    padding: 0.6rem 1.2rem;
-    font-weight: 600;
-    transition: background-color 0.3s ease, color 0.3s ease;
-}
-
-button#inputGroupFileAddon04:hover {
-    background-color: var(--rojo-UDG);
-    color: white;
-    border-color: var(--rojo-UDG);
-}
-
-/* Estilo del input de archivos */
-input[type="file"].form-control {
-    background-color: var(--gris-fuerte);
-    color: var(--gris-claro);
-    border: 2px solid var(--rojo-UDG);
-    border-radius: 6px;
-    padding: 8px;
-    transition: all 0.3s ease;
-}
-
-input[type="file"].form-control:hover {
-    border-color: var(--amarillo-UDG);
-    background-color: #3a3a3f;
-    cursor: pointer;
-}
-
-input[type="file"]::file-selector-button {
-    background-color: var(--rojo-UDG);
-    color: white;
-    border: none;
-    padding: 6px 12px;
-    margin-right: 12px;
-    border-radius: 4px;
-    transition: background-color 0.3s ease;
-}
-
-input[type="file"]::file-selector-button:hover {
-    background-color: #8c121f;
-}
-
-/* Estilo del texto que aparece abajo del input */
-#archivoSeleccionado {
-    color: var(--amarillo-UDG);
-    font-weight: 500;
-    margin-top: 10px;
-}
-
-/* === Sección de Resultados DICOM con diseño UDG refinado === */
-.table-container-card {
-    background-color: var(--gris-oscuro);
-    border-radius: 12px;
-    padding: 2rem;
-    box-shadow: 0 4px 20px rgba(174, 28, 40, 0.15);
-    transition: box-shadow 0.3s ease;
-}
-
-.table-container-card:hover {
-    box-shadow: 0 6px 24px rgba(255, 215, 0, 0.15);
-}
-
-.table-container-card h1 {
-    color: var(--amarillo-UDG);
-    font-weight: 700;
-    font-size: 1.75rem;
-    margin-bottom: 1.5rem;
-}
-
-/* Tabla con estilo UDG sobrio */
-.table.udg-style {
-    background-color: var(--gris-claro);
-    color: var(--gris-fuerte);
-    border: 2px solid var(--gris-oscuro);
-    border-radius: 8px;
-    overflow: hidden;
-}
-
-.table.udg-style thead {
-    background-color: var(--gris-fuerte);
-    color: var(--gris-claro);
-    font-weight: bold;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-}
-
-.table.udg-style thead th {
-    padding: 0.75rem 1.2rem;
-    border-bottom: 2px solid var(--gris-medio);
-}
-
-.table.udg-style tbody td {
-    color: var(--gris-oscuro);
-    background-color: var(--gris-debil);
-    padding: 0.7rem 1rem;
-    transition: background-color 0.3s ease;
-}
-
-.table.udg-style tbody tr:hover {
-    background-color: var(--amarillo-UDG);
-    color: var(--gris-oscuro);
-    font-weight: 500;
-    cursor: pointer;
-}
-
-/* Texto que indica la selección */
-#selectedText {
-    font-weight: 600;
-    color: var(--rojo-UDG);
-    margin-top: 1rem;
-    font-size: 1.1rem;
-}
-
-/* Botón Aceptar personalizado */
+/* Botón "Aceptar" personalizado */
 #acceptButton {
     background-color: var(--rojo-UDG);
     color: white;
@@ -408,217 +202,210 @@ input[type="file"]::file-selector-button:hover {
     box-shadow: 0 2px 6px rgba(174, 28, 40, 0.3);
     transition: background-color 0.3s ease, box-shadow 0.3s ease;
 }
-
 #acceptButton:hover {
     background-color: #89171e;
     box-shadow: 0 4px 10px rgba(174, 28, 40, 0.4);
 }
 
-/* === Estilo para tabla de anonimización con diseño UDG === */
-#tabla-container {
-    background-color: var(--gris-oscuro);
-    border-radius: 12px;
-    padding: 2rem;
-    box-shadow: 0 4px 20px rgba(174, 28, 40, 0.15);
-    margin-bottom: 2rem;
+/* =========================================
+   5. FORMULARIOS Y INPUTS
+   ========================================= */
+/* Input de archivo personalizado */
+input[type="file"].form-control {
+    background-color: #3e3e44;
+    color: var(--gris-claro);
+    border: 2px solid var(--rojo-UDG);
+    border-radius: 8px; /* Unificado */
+    padding: 0.6rem 1rem;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s ease;
 }
 
+input[type="file"].form-control:hover {
+    border-color: var(--amarillo-UDG);
+    background-color: #3a3a3f;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+    cursor: pointer;
+}
+
+input[type="file"]::file-selector-button {
+    background-color: var(--rojo-UDG);
+    color: white;
+    padding: 0.4rem 0.8rem;
+    border: none;
+    border-radius: 6px;
+    margin-right: 12px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+input[type="file"]::file-selector-button:hover {
+    background-color: var(--amarillo-UDG);
+    color: black;
+}
+
+/* Botón de carga (Addon) */
+button#inputGroupFileAddon04 {
+    background-color: var(--amarillo-UDG);
+    color: #222;
+    border: 2px solid var(--amarillo-UDG);
+    border-radius: 0 8px 8px 0;
+    padding: 0.6rem 1.2rem;
+    font-weight: 600;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+button#inputGroupFileAddon04:hover {
+    background-color: var(--rojo-UDG);
+    color: white;
+    border-color: var(--rojo-UDG);
+}
+
+#archivoSeleccionado {
+    color: var(--amarillo-UDG);
+    font-weight: 500;
+    margin-top: 10px;
+}
+
+/* =========================================
+   6. TABLAS (Resultados y Anonimización)
+   ========================================= */
+/* Estilos generales para tablas */
+.table {
+    background-color: transparent;
+    color: var(--gris-debil);
+    border-collapse: separate;
+    border-spacing: 0 6px;
+}
+.table th {
+    background-color: var(--gris-fuerte);
+    color: var(--gris-claro);
+    font-weight: 600;
+    border-bottom: 1px solid var(--gris-medio);
+    padding: 12px 15px;
+}
+.table td {
+    background-color: #44444d;
+    border-radius: 6px;
+    color: var(--gris-claro);
+    border: none;
+    padding: 12px 15px;
+}
+
+/* Tabla estilo UDG refinado */
+.table.udg-style {
+    background-color: var(--gris-claro);
+    color: var(--gris-fuerte);
+    border: 2px solid var(--gris-oscuro);
+    border-radius: 8px;
+    border-collapse: separate;
+    border-spacing: 0 6px;
+    overflow: hidden;
+}
+.table.udg-style thead {
+    background-color: var(--gris-fuerte);
+    color: var(--gris-claro);
+    font-weight: bold;
+    text-transform: uppercase;
+}
+.table.udg-style tbody td {
+    color: var(--gris-oscuro);
+    background-color: var(--gris-debil);
+    padding: 0.7rem 1rem;
+    transition: background-color 0.3s ease;
+}
+.table.udg-style tbody tr:hover {
+    background-color: var(--amarillo-UDG);
+    color: var(--gris-oscuro);
+    font-weight: 500;
+    cursor: pointer;
+}
+
+/* Tabla de Anonimización específica */
 #tabla-container table {
     border-collapse: collapse;
     width: 100%;
     color: var(--gris-claro);
     border: 2px solid var(--gris-medio);
     border-radius: 8px;
-    overflow: hidden;
 }
-
-#tabla-container thead {
-    background-color: var(--gris-fuerte);
-    color: var(--gris-claro);
-    text-transform: uppercase;
-    font-weight: bold;
-    letter-spacing: 0.5px;
-}
-
-#tabla-container th,
-#tabla-container td {
+#tabla-container th, #tabla-container td {
     padding: 0.75rem 1rem;
     text-align: center;
     border: 1px solid var(--gris-debil);
 }
-
 #tabla-container tbody tr:hover {
     background-color: var(--amarillo-UDG);
     color: var(--gris-oscuro);
-    transition: background-color 0.3s ease;
 }
-
-/* Estilo para filas cabecera de grupo */
 #tabla-container tr[id^="header_"] {
     background-color: #f8f8f8;
     color: var(--rojo-UDG);
     font-weight: bold;
     font-size: 1.1rem;
 }
-
-/* Input de edición */
 #tabla-container input[type="text"] {
     background-color: var(--gris-fuerte);
     color: var(--gris-claro);
     border: 1px solid var(--rojo-UDG);
     border-radius: 6px;
     padding: 0.4rem 0.8rem;
-    transition: all 0.3s ease;
 }
-
 #tabla-container input[type="text"]:focus {
     border-color: var(--amarillo-UDG);
     outline: none;
 }
 
-/* Contenedor de botones */
-#botones-container {
-    text-align: center;
-    margin-top: 1.5rem;
-}
-
-#botones-container .btn-custom {
-    padding: 0.6rem 1.5rem;
-    font-weight: 500;
-    border-radius: 6px;
-    margin: 0 0.5rem;
-}
-
-/* Botón guardar estilo UDG */
+/* Contenedor de Botones en Anonimización */
+#botones-container { text-align: center; margin-top: 1.5rem; }
+#botones-container .btn-custom { margin: 0 0.5rem; padding: 0.6rem 1.5rem; }
 #botones-container .btn-secondary {
     background-color: var(--gris-fuerte);
-    border: 2px solid var(--gris-medio);
+    border-color: var(--gris-medio);
     color: var(--amarillo-UDG);
 }
-
 #botones-container .btn-secondary:hover {
     background-color: var(--gris-debil);
     color: var(--gris-oscuro);
-    border-color: var(--gris-oscuro);
 }
-
-/* Botón exportar estilo UDG */
 #botones-container .btn-success {
     background-color: var(--rojo-UDG);
+    border-color: var(--rojo-UDG);
     color: var(--gris-oscuro);
-    border: 2px solid var(--rojo-UDG);
 }
-
 #botones-container .btn-success:hover {
     background-color: #89171e;
     color: white;
-    border-color: var(--gris-oscuro);
 }
+#mensaje-todos-excluidos h3 { color: var(--rojo-UDG); font-weight: 600; margin-top: 2rem; }
 
-/* Mensaje sin atributos */
-#mensaje-todos-excluidos h3 {
-    color: var(--rojo-UDG);
-    font-weight: 600;
-    margin-top: 2rem;
-}
-
-.fullscreen-active {
-  position: fixed; /* Lo saca del flujo normal del documento */
-  top: 0;
-  left: 0;
-  width: 100vw; /* 100% del ancho de la ventana */
-  height: 100vh; /* 100% de la altura de la ventana */
-  background-color: var(--gris-oscuro);
-  z-index: 1050; /* Un z-index alto para que se ponga por encima de todo */
-  padding: 1.5rem; /* Un poco de espacio en los bordes */
-  display: flex;
-  flex-direction: column;
-}
-
-/* Asegura que el contenido dentro del modo pantalla completa se expanda */
-.fullscreen-active .card-body,
-.fullscreen-active .image-wrapper,
-.fullscreen-active .iframe-wrapper {
-  height: 100%;
-  width: 100%;
-  flex-grow: 1; /* Permite que el contenedor crezca para llenar el espacio */
-}
-
-.fullscreen-active iframe {
-  border: 1px solid var(--gris-fuerte); /* Un borde sutil para el iframe */
-  border-radius: 8px;
-}
-
-.image-wrapper {
-  width: 100%;
-  aspect-ratio: 1; /* usa 4/3, 16/9 si quieres proporciones diferentes */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.image-wrapper img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-
-.iframe-wrapper {
-  width: 100%;
-  height: 100%;      /* O asigna un height fijo alto si usas flexbox en el padre */
-  aspect-ratio: 4 / 3; /* Mantén proporción, o ajusta */
-  overflow: hidden;  /* Para que no haya scroll */
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.iframe-wrapper iframe {
-  width: 100%;
-  height: 100%;
-  border: none;
-}
-
-#card_3D, 
-#card_3D > .card-body, 
-.iframe-wrapper {
-  height: 100%; /* Que se llenen en altura */
-  min-height: 0; /* Para evitar problemas de flexbox */
-}
-
-/* --- Estilos del Visor DICOM --- */
-
-/* Contenedor principal que centra y limita el ancho del visor */
+/* =========================================
+   7. VISOR DICOM (Render Layout)
+   ========================================= */
 #viewer-wrapper {
-  max-width: 1600px;
-  margin: 0 auto;
-  height: calc(100vh - 80px);
+    max-width: 1600px;
+    margin: 0 auto;
+    height: calc(100vh - 80px);
 }
 
-/* Contenedor flex que alinea la sidebar y la grilla */
 #viewer-container {
-  display: flex;
-  height: 100%;
-  width: 100%;
+    display: flex;
+    height: 100%;
+    width: 100%;
 }
 
-/* Sidebar de plugins a la izquierda */
 #plugins-sidebar {
-  flex-basis: 340px; 
-  flex-shrink: 0;
-  padding: 1rem;
-  overflow-y: auto;
+    flex-basis: 340px; 
+    flex-shrink: 0;
+    padding: 1rem;
+    overflow-y: auto;
 }
 
-/* Contenedor para la grilla de cuadrantes a la derecha */
 #quadrant-grid-wrapper {
-  flex-grow: 1;
-  padding: 1rem;
-  min-width: 0;
+    flex-grow: 1;
+    padding: 1rem;
+    min-width: 0;
 }
 
-/* La grilla 2x2 donde viven los cuadrantes */
 #quadrant-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -628,103 +415,112 @@ input[type="file"]::file-selector-button:hover {
     width: 100%;
 }
 
-/* Estilo para cada tarjeta de cuadrante */
 .quadrant-card {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
 }
 
 .quadrant-card .card-body {
-  display: flex;
-  flex-direction: column;
-  flex-grow: 1;
-  min-height: 0;
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    min-height: 0;
 }
 
-/* Contenedor de la imagen/iframe dentro de la tarjeta */
+/* Contenedores de imagen e iframe */
 .image-wrapper, .iframe-wrapper {
-  flex-grow: 1;
-  position: relative;
-  min-height: 0;
+    flex-grow: 1;
+    position: relative;
+    min-height: 0;
+    width: 100%;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
-/* La imagen y el canvas se ajustan a su contenedor */
-.image-wrapper img, .iframe-wrapper iframe, .image-wrapper canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  pointer-events: auto;
+.iframe-wrapper iframe, .image-wrapper img, .image-wrapper canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: contain;
+    pointer-events: auto;
+    border: none;
 }
 
+/* Overlay específico para canvas de dibujo */
 #overlay_axial, #overlay_sagital, #overlay_coronal {
-  pointer-events: none; /* El overlay deja pasar los clics */
+    pointer-events: none; /* Permite clic a través */
 }
 
-/* Estilo para la cuadrícula de información del punto de control */
-.point-info-grid {
-  display: grid;
-  grid-template-columns: auto 1fr; /* Columna para etiqueta, Columna para valor */
-  gap: 2px 8px; /* Espacio entre filas y columnas */
-  align-items: center;
+/* Modo Pantalla Completa */
+.fullscreen-active {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    background-color: var(--gris-oscuro);
+    z-index: 1050;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+}
+.fullscreen-active .card-body,
+.fullscreen-active .image-wrapper,
+.fullscreen-active .iframe-wrapper {
+    height: 100%;
+    width: 100%;
+    flex-grow: 1;
 }
 
-/* Estilo para las etiquetas (Id:, x:, y:) */
-.point-info-grid span:nth-child(odd) {
-  font-weight: bold;
-  text-align: right;
-  color: var(--gris-debil);
-}
+/* =========================================
+   8. HERRAMIENTAS DEL VISOR (Widgets)
+   ========================================= */
+/* Window Level Controls */
+#windowLevelControls .d-flex { gap: 0.25rem; }
+#windowLevelControls .d-flex .btn { flex: 1; white-space: nowrap; }
 
-/* Ajuste para los botones de preajuste (Pulmón, Hueso, Tejido) */
-#windowLevelControls .d-flex {
-  gap: 0.25rem; /* Añade un pequeño espacio entre los botones */
-}
-
-#windowLevelControls .d-flex .btn {
-  flex: 1; /* Hace que cada botón ocupe una parte igual del espacio disponible */
-  white-space: nowrap; /* Evita que el texto del botón se parta en dos líneas */
-}
-
+/* Editor de Curvas */
 #curve-editor-wrapper {
-  width: 100%;
-  border: 1px solid var(--gris-fuerte);
-  border-radius: 0.25rem;
-  position: relative;
-  background-color: var(--gris-oscuro);
-  aspect-ratio: 1.25 / 1; /* <--- VALOR AJUSTADO PARA HACERLO MÁS GRANDE */
+    width: 100%;
+    border: 1px solid var(--gris-fuerte);
+    border-radius: 0.25rem;
+    position: relative;
+    background-color: var(--gris-oscuro);
+    aspect-ratio: 1.25 / 1;
 }
 
-/* Oculta las flechas (spinners) de los campos numéricos en todos los navegadores */
+/* Cuadrícula de info de puntos */
+.point-info-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px 8px;
+    align-items: center;
+}
+.point-info-grid span:nth-child(odd) {
+    font-weight: bold;
+    text-align: right;
+    color: var(--gris-debil);
+}
+
+/* Spinners Numéricos Personalizados */
 .custom-spinner input[type='number']::-webkit-inner-spin-button,
 .custom-spinner input[type='number']::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
+    -webkit-appearance: none; margin: 0;
 }
+.custom-spinner input[type='number'] { -moz-appearance: textfield; }
 
-.custom-spinner input[type='number'] {
-  -moz-appearance: textfield; /* Para Firefox */
-}
-
-/* Ajuste para que los botones no sean tan anchos */
 .custom-spinner .btn {
-  padding: 0.25rem 0.5rem;
-  line-height: 1.5;
+    padding: 0.25rem 0.5rem;
+    line-height: 1.5;
 }
-
-/* Corrección para hacer visibles los botones '+' y '-' del spinner personalizado */
 .custom-spinner .btn.btn-outline-secondary {
-  color: var(--gris-claro); /* Cambia el color del texto a claro */
-  border-color: var(--gris-medio); /* Cambia el color del borde a uno más visible */
+    color: var(--gris-claro);
+    border-color: var(--gris-medio);
 }
-
-/* Mejora el efecto hover para que sea más notorio */
 .custom-spinner .btn.btn-outline-secondary:hover {
-  background-color: var(--gris-fuerte);
-  color: white;
+    background-color: var(--gris-fuerte);
+    color: white;
 }
