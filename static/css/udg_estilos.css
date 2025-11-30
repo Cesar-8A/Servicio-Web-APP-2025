@@ -573,6 +573,7 @@ button#inputGroupFileAddon04:hover {
     border-radius: 8px;
     transition: all 0.3s ease;
 }
+.custom-spinner input[type='number'] { -moz-appearance: textfield; }
 
 .navbar-brand:hover {
     background-color: rgba(255, 215, 0, 0.1); 
