@@ -465,7 +465,7 @@ input[type="file"]:focus::file-selector-button {
 /* Etiquetas (X, Y, Z, Densidad) */
 #huResult .text-muted, 
 #huResult .text-secondary {
-    color: #888 !important; /* Gris medio legible */
+    color: #ffffff !important; /* Gris medio legible */
 }
 
 /* Valores de Coordenadas */
@@ -528,3 +528,29 @@ input[type="file"]:focus::file-selector-button {
     padding: 6px 4px !important; border-bottom: 1px solid #333 !important; font-size: 0.8rem !important;
 }
 #metadataList span.val { color: var(--color-acento); text-align: right; font-weight: bold; margin-left: 10px; word-break: break-word; }
+
+/* =========================================
+   AJUSTES RESPONSIVOS
+   ========================================= */
+@media (max-width: 992px) {
+    /* Hacemos la tarjeta un poco más compacta */
+    .card {
+        padding: 1.5rem !important;
+    }
+    
+    /* Reducimos el icono gigante */
+    .bi-folder-plus {
+        font-size: 2.5rem !important;
+    }
+    
+    /* Ajustamos el tamaño del título */
+    h3 {
+        font-size: 1.5rem;
+    }
+    
+    /* Aseguramos que el botón de subir no se rompa */
+    .input-group-integrated .btn-upload {
+        padding: 0.6rem 1rem;
+        font-size: 0.9rem;
+    }
+}
