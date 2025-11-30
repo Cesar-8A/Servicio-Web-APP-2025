@@ -187,32 +187,68 @@ def update_3d_render(user_data, mode):
 
 
 def add_RT_to_plotter(user_data):
-    """Añade una malla de segmentación (RT Struct) al plotter 3D existente."""
-    try:
-        # Recupera los objetos correctos que guardó create_render
-        plotter = user_data.get('vtk_plotter')
-        panel_vtk = user_data.get('vtk_panel')
-        if not all([plotter, panel_vtk]): 
-            print("Error: El plotter 3D o el panel no se encontraron en la sesión.")
-            return
+    """
+    Intenta añadir la máscara RT aplicando las transformaciones de ejes originales.
+    """
+    plotter = user_data.get('vtk_plotter')
+    panel_vtk = user_data.get('vtk_panel')
+    grid_full = user_data.get('grid_full') 
+    
+    if not all([plotter, panel_vtk, 'RT' in user_data, grid_full]): 
+        return False, "Faltan datos base."
 
-        # Procesa la imagen RT
-        rt_image = np.flip(user_data['RT'], axis=(0, 2)).transpose(2, 0, 1)
-        user_data['RT_aligned'] = np.flip(user_data['RT'], axis=(0, 2))
-        rt_grid = pv.wrap(rt_image)
-        surface = rt_grid.contour([0.5])
+    try:
+        # 1. Obtener datos crudos
+        rt_data = user_data['RT'] 
         
-        # Añade la nueva malla al plotter que ya existe en la sesión
+        # --- RECUPERANDO LA "MAGIA" DE TU VERSIÓN ORIGINAL ---
+        # El formato NRRD a menudo viene con ejes invertidos o rotados respecto al DICOM.
+        # Esta combinación (flip axis 0 y 2, luego transpose) era la que te funcionaba antes.
+        try:
+            # Intentamos aplicar la transformación. 
+            # Nota: Esto asume que el array es 3D.
+            rt_data = np.flip(rt_data, axis=(0, 2)).transpose(2, 0, 1)
+        except Exception as e:
+            print(f"No se pudo transformar ejes (posiblemente shape incorrecto): {e}")
+            # Si falla, usamos los datos tal cual
+            pass
+        # -----------------------------------------------------
+
+        # 2. Crear la malla a la medida de los datos YA TRANSFORMADOS
+        rt_dims = np.array(rt_data.shape) + 1
+        
+        rt_grid = pv.ImageData(
+            dimensions=rt_dims, 
+            spacing=grid_full.spacing, 
+            origin=grid_full.origin
+        )
+        
+        # 3. Inyección de datos
+        # Usamos flatten order="F" (Fortran-style) que es estándar para VTK/PyVista
+        rt_grid.cell_data["values"] = rt_data.flatten(order="F")
+        
+        # Convertir a puntos para el contorno (corrección anterior)
+        rt_grid = rt_grid.cell_data_to_point_data()
+
+        # 4. Guardamos para 2D (Overlay)
+        # Para el 2D, usamos la misma transformación para que coincida
+        user_data['RT_aligned'] = rt_data
+
+        # 5. Crear contorno y añadir
+        surface = rt_grid.contour([0.5]) 
+        
+        plotter.remove_actor("rt_struct") 
         plotter.add_mesh(surface, color="red", opacity=0.5, name="rt_struct", smooth_shading=True)
         
-        # ---> PUNTO CLAVE <---
-        # Esta es la línea que le dice a Panel/Bokeh que la escena ha cambiado
-        # y que debe enviar una actualización al frontend a través de WebSocket.
         panel_vtk.param.trigger('object')
-        print("RT Struct añadido y actualización de la vista activada.")
+        
+        msg = "Segmentación cargada (Ejes transformados)."
+        return True, msg
 
     except Exception as e:
-        print(f"Error en add_RT_to_plotter: {e}")
+        error_msg = f"Error crítico RT: {str(e)}"
+        print(error_msg)
+        return False, error_msg
 
 def _extract_spacing_for_series(unique_id, user_data):
     """Calcula el espaciado entre píxeles (dx, dy, dz) de forma robusta."""
@@ -479,15 +515,36 @@ def get_image(view, layer):
 
 @app.route("/upload_RT", methods=["POST"])
 def upload_RT():
-    """Maneja la subida de un archivo RT Struct en formato NRRD."""
+    """Maneja la subida de un archivo RT Struct y guarda sus metadatos."""
     user_data = get_user_data()
+    
     file = request.files.get("file")
-    if not file or file.filename == '': return "Archivo inválido", 400
-    filepath = os.path.join(UPLOAD_FOLDER_NRRD, file.filename); file.save(filepath)
-    user_data['RT'], _ = nrrd.read(filepath)
-    add_RT_to_plotter(user_data)
-    dims = user_data.get("dims", (1, 1, 1))
-    return render_template("render.html", success=1, max_value_axial=dims[0] - 1, max_value_coronal=dims[1] - 1, max_value_sagital=dims[2] - 1)
+    if not file or file.filename == '':
+        return jsonify({"status": "error", "message": "No se seleccionó ningún archivo."}), 400
+    
+    if not file.filename.lower().endswith('.nrrd'):
+        return jsonify({"status": "error", "message": "Formato inválido. Solo se aceptan archivos .nrrd"}), 400
+
+    try:
+        filepath = os.path.join(UPLOAD_FOLDER_NRRD, file.filename)
+        file.save(filepath)
+        
+        # --- CAMBIO IMPORTANTE: Leemos y GUARDAMOS el header ---
+        rt_data, rt_header = nrrd.read(filepath)
+        
+        user_data['RT'] = rt_data 
+        user_data['RT_header'] = rt_header # <--- Aquí está la clave de la posición
+        # -------------------------------------------------------
+        
+        success, message = add_RT_to_plotter(user_data)
+        
+        if success:
+            return jsonify({"status": "success", "message": message})
+        else:
+            return jsonify({"status": "error", "message": message}), 500
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Error interno: {str(e)}"}), 500
 
 @app.route("/hu_value")
 def hu_value():

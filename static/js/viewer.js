@@ -1,7 +1,10 @@
 document.addEventListener('DOMContentLoaded', function() {
     // --- ESTADO GLOBAL Y CONFIGURACIÓN ---
     const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
-    [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
+    // Agregamos { trigger: 'hover' } para que el clic no deje pegado el tooltip
+    [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl, {
+        trigger: 'hover' 
+    }));
 
     // --- FUNCIÓN DEBOUNCE (Para escritura manual) ---
     function debounce(func, delay = 250) {
@@ -46,6 +49,7 @@ document.addEventListener('DOMContentLoaded', function() {
         wc: 40,
         baseImages: { axial: null, sagital: null, coronal: null },
         huMode: false,
+        inspectorMode: false
     };
     const zoomState = {
         axial:   { scale: 1, panX: 0, panY: 0, isDragging: false },
@@ -69,26 +73,75 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- LÓGICA DE PLUGINS DE LA BARRA LATERAL ---
     function setupPluginButton(btnId, containerId, onToggleCallback) {
         const btn = document.getElementById(btnId);
-        const container = document.getElementById(containerId);
-        if (!btn || !container) return;
+        // containerId puede ser null para botones toggle sin panel (como el Inspector)
+        const container = containerId ? document.getElementById(containerId) : null;
+        
+        if (!btn) return; // Si no hay botón, salir
+
         btn.addEventListener('click', () => {
-            const isActive = container.style.display === 'block';
-            container.style.display = isActive ? 'none' : 'block';
-            btn.classList.toggle('btn-udg-rojo', !isActive);
+            // Manejo visual del botón activo
+            // Nota: Usamos una clase temporal 'active-tool' o verificamos el estilo
+            // Aquí asumimos tu lógica de toggle con btn-udg-rojo
+            const isActive = btn.classList.contains('btn-udg-rojo');
+            
+            // Toggle estado
+            if (isActive) {
+                btn.classList.remove('btn-udg-rojo');
+                // btn.classList.add('btn-secondary'); // Opcional, si usas esa clase base
+                if (container) container.style.display = 'none';
+            } else {
+                btn.classList.add('btn-udg-rojo');
+                // btn.classList.remove('btn-secondary'); 
+                if (container) container.style.display = 'block';
+            }
+
+            // Callback con el nuevo estado (invertido porque acabamos de cambiarlo arriba? 
+            // No, isActive era el estado ANTERIOR. El nuevo estado es !isActive)
             if (onToggleCallback) onToggleCallback(!isActive);
         });
     }
 
     setupPluginButton('rtStructPluginBtn', 'rtStructPluginContainer');
+    
     setupPluginButton('huPickerPluginBtn', 'huPickerPluginContainer', (isActive) => {
-        document.getElementById('huToggle').click();
+        // Lógica específica para HU
+        const huToggle = document.getElementById('huToggle');
+        if (huToggle) huToggle.click(); // Mantener compatibilidad con tu lógica vieja
+        
+        // Si activamos HU, apagamos Inspector para evitar conflictos
+        if (isActive) {
+            viewState.inspectorMode = false;
+            const inspectorBtn = document.getElementById('inspectorPluginBtn');
+            if (inspectorBtn) inspectorBtn.classList.remove('btn-udg-rojo');
+            VIEWS.forEach(clearOverlay);
+        }
     });
+
     setupPluginButton('windowLevelBtn', 'windowLevelControls');
+
     setupPluginButton('contrastEditorBtn', 'contrastEditorContainer', (isActive) => {
         if (isActive && !contrastState.histogramData) {
             fetchHistogram();
         } else {
             drawCurveAndHistogram();
+        }
+    });
+
+    // Configuración del botón Inspector
+    setupPluginButton('inspectorPluginBtn', null, (isActive) => {
+        viewState.inspectorMode = isActive;
+        
+        if (isActive) {
+            // --- AL ACTIVAR ---
+            viewState.huMode = false; // Apagar HU para evitar conflictos
+            
+            // Apagar visualmente el botón HU si estaba prendido
+            const huBtn = document.getElementById('huPickerPluginBtn');
+            if (huBtn) huBtn.classList.remove('btn-udg-rojo');
+            
+        } else {
+            // Limpiamos los canvas de todas las vistas para borrar las líneas
+            VIEWS.forEach(view => clearOverlay(view));
         }
     });
 
@@ -139,9 +192,64 @@ document.addEventListener('DOMContentLoaded', function() {
         debouncedUpdateFromFields(max - min, (max + min) / 2);
     });
     
-    document.getElementById('presetBtnLung')?.addEventListener('click', () => updateWWWC(1500, -600));
-    document.getElementById('presetBtnBone')?.addEventListener('click', () => updateWWWC(2500, 480));
-    document.getElementById('presetBtnSoftTissue')?.addEventListener('click', () => updateWWWC(400, 40));
+    // --- LÓGICA DE PRESETS CON FEEDBACK VISUAL ---
+    
+    // Función para resaltar el botón activo
+    function highlightPreset(activeId) {
+        // Lista de IDs de los botones
+        const presets = ['presetBtnLung', 'presetBtnBone', 'presetBtnSoftTissue'];
+        
+        presets.forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                // 1. Limpiamos el estilo activo de TODOS
+                btn.classList.remove('preset-active');
+                // 2. Volvemos al estilo gris por defecto
+                btn.classList.add('btn-outline-secondary');
+            }
+        });
+
+        // 3. Activamos SOLO el que se clickeó (si hay alguno)
+        if (activeId) {
+            const activeBtn = document.getElementById(activeId);
+            if (activeBtn) {
+                activeBtn.classList.remove('btn-outline-secondary'); // Quitar gris
+                activeBtn.classList.add('preset-active'); // Poner azul médico
+            }
+        }
+    }
+
+    // Event Listeners para los botones (Asegúrate de reemplazar los anteriores si existían)
+    document.getElementById('presetBtnLung')?.addEventListener('click', () => {
+        updateWWWC(1500, -600); // Nota: aquí usamos updateWWWC en lugar de applyWindowLevel si esa es tu función original
+        highlightPreset('presetBtnLung');
+    });
+    
+    document.getElementById('presetBtnBone')?.addEventListener('click', () => {
+        updateWWWC(2500, 480);
+        highlightPreset('presetBtnBone');
+    });
+    
+    document.getElementById('presetBtnSoftTissue')?.addEventListener('click', () => {
+        updateWWWC(400, 40);
+        highlightPreset('presetBtnSoftTissue');
+    });
+
+    // Modificamos los listeners de los sliders para que "apaguen" los botones si mueves manual
+    
+    wwSlider?.addEventListener('input', () => {
+        // Tu lógica existente para actualizar WW...
+        highlightPreset(null); // Apaga todos los botones
+        const disp = document.getElementById('ww_val_display');
+        if(disp) disp.textContent = wwSlider.value;
+    });
+    
+    wcSlider?.addEventListener('input', () => {
+        // Tu lógica existente para actualizar WC...
+        highlightPreset(null); // Apaga todos los botones
+        const disp = document.getElementById('wc_val_display');
+        if(disp) disp.textContent = wcSlider.value;
+    });
 
 
     // --- LÓGICA DE SLIDERS DE CORTE ---
@@ -459,12 +567,11 @@ document.addEventListener('DOMContentLoaded', function() {
         // 1. Obtenemos el rectángulo TOTAL del elemento (incluye las zonas negras)
         const rect = canvasEl.getBoundingClientRect();
         
-        // 2. Dimensiones internas reales de la imagen (resolución original, ej. 512x512)
+        // 2. Dimensiones internas reales de la imagen
         const internalW = canvasEl.width;
         const internalH = canvasEl.height;
         
         // 3. Calculamos el factor de escala real ("object-fit: contain")
-        // El navegador usa la escala más pequeña para que quepa todo
         const scaleX = rect.width / internalW;
         const scaleY = rect.height / internalH;
         const scale = Math.min(scaleX, scaleY);
@@ -474,12 +581,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const activeH = internalH * scale;
         
         // 5. Calculamos el tamaño de las "barras negras" (offsets)
-        // Si la imagen está centrada, el offset es la mitad del espacio sobrante
         const offsetX = (rect.width - activeW) / 2;
         const offsetY = (rect.height - activeH) / 2;
 
         // 6. Calculamos el clic relativo SOLO a la imagen visible
-        // Restamos la posición del canvas Y el borde negro
         const visualClickX = (evt.clientX - rect.left) - offsetX;
         const visualClickY = (evt.clientY - rect.top) - offsetY;
 
@@ -487,14 +592,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const xPix = Math.floor(visualClickX / scale);
         const yPix = Math.floor(visualClickY / scale);
 
-        // 8. Validamos que el clic esté realmente DENTRO de la imagen y no en lo negro
+        // 8. Validamos que el clic esté realmente DENTRO de la imagen
         if (xPix < 0 || yPix < 0 || xPix >= internalW || yPix >= internalH) return null;
 
         return {
             xPix: xPix,
             yPix: yPix,
-            // Para dibujar, usamos la coordenada interna. Como el Overlay
-            // tiene el mismo "object-fit" que la imagen, se alineará solo.
             cssX: xPix, 
             cssY: yPix
         };
@@ -572,56 +675,63 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // --- LÓGICA DEL FORMULARIO RT STRUCT ---
+    // --- LÓGICA DEL FORMULARIO RT STRUCT (Robustecida) ---
     const rtStructForm = document.getElementById('rtStructForm');
-  if (rtStructForm) { 
-    rtStructForm.addEventListener("submit", function (event) { 
-        event.preventDefault(); 
-        let formData = new FormData(this); 
-        const token = document.querySelector('meta[name="csrf-token"]').content;
-        const loader = document.getElementById('loader-wrapper');
+    if (rtStructForm) {
+        rtStructForm.addEventListener("submit", function (event) {
+            event.preventDefault();
+            
+            let formData = new FormData(this);
+            const token = document.querySelector('meta[name="csrf-token"]').content;
+            const loader = document.getElementById('loader-wrapper');
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const iframe = document.getElementById('DicomRender');
 
-        // 1. Muestra la pantalla de carga
-        if (loader) {
-            loader.style.display = 'flex';
-            loader.style.opacity = '1';
-        }
-        
-        fetch("/upload_RT", { 
-            method: "POST", 
-            headers: { 'X-CSRFToken': token }, 
-            body: formData 
-        })
-        .then(response => {
-            if (!response.ok) {
-                // Si el servidor responde con un error, lo mostramos
-                throw new Error('Error en la respuesta del servidor al subir el archivo.');
-            }
-            return response.json();
-        })
-        .then(data => {
-            console.log("Respuesta del servidor:", data.mensaje);
-            // 2. NO HACEMOS NADA para recargar el iframe.
-            // Confiamos en que el backend envíe la actualización a través de WebSocket.
-        })
-        .catch(error => {
-            console.error("Error al cargar el archivo RT Struct:", error);
-            alert("Hubo un error al cargar el archivo.");
-        })
-        .finally(() => {
-            // 3. Oculta la pantalla de carga después de un momento.
-            // Le damos tiempo al backend para que envíe la actualización visual.
-            if (loader) {
-                setTimeout(() => {
+            // Feedback visual: mostrar carga y deshabilitar botón
+            if (loader) { loader.style.display = 'flex'; loader.style.opacity = '1'; }
+            if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Procesando...'; }
+
+            fetch("/upload_RT", {
+                method: "POST",
+                headers: { 'X-CSRFToken': token },
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // ÉXITO: Forzamos actualización del iframe 3D
+                    console.log("RT cargado:", data.message);
+                    if (iframe) {
+                        // Truco del timestamp para obligar al navegador a redibujar
+                        const currentSrc = iframe.src.split('?')[0];
+                        iframe.src = currentSrc + '?t=' + new Date().getTime();
+                    }
+                    alert("Segmentación cargada correctamente.");
+                } else {
+                    // ERROR CONTROLADO (Backend dijo que no pudo)
+                    throw new Error(data.message || "Error desconocido al procesar.");
+                }
+            })
+            .catch(error => {
+                // ERROR DE RED O PROCESAMIENTO
+                console.error("Error RT:", error);
+                alert("⚠️ No se pudo cargar la segmentación:\n" + error.message + "\n\nLa visualización actual se mantendrá.");
+            })
+            .finally(() => {
+                // RESTAURAR UI (Pase lo que pase)
+                if (loader) {
                     loader.style.opacity = '0';
-                    setTimeout(() => {
-                        loader.style.display = 'none';
-                    }, 500);
-                }, 1000); // Espera 1 segundo antes de ocultar
-            }
+                    setTimeout(() => { loader.style.display = 'none'; }, 500);
+                }
+                if (submitBtn) { 
+                    submitBtn.disabled = false; 
+                    submitBtn.innerHTML = '<i class="bi bi-upload"></i> Procesar'; 
+                }
+                // Limpiar el input file
+                rtStructForm.reset();
+            });
         });
-    }); 
-  }
+    }
 
     // --- LÓGICA DE CAMBIO DE RENDERIZADO 3D  ---
     function setup3DRendererControls() {
@@ -669,7 +779,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const updateTransform = () => {
             const zs = zoomState[view];
             // Aplicamos el transform. Nota: panX/panY ahora solo se usan para compensar
-            // el zoom hacia el mouse, no para arrastrar la imagen.
+            // el zoom hacia el mouse, no para arrastrar la imagen manualmente.
             const transform = `translate(${zs.panX}px, ${zs.panY}px) scale(${zs.scale})`;
             
             canvas.style.transform = transform;
@@ -714,6 +824,114 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // --- LÓGICA DEL INSPECTOR 3D (CROSSHAIR) ---
+    function drawCrosshair(view, x, y) {
+        const overlay = document.getElementById(`overlay_${view}`);
+        const mainCanvas = document.getElementById(`canvas_${view}`);
+        if (!overlay || !mainCanvas) return;
+
+        // Limpiar y preparar
+        overlay.width = mainCanvas.width;
+        overlay.height = mainCanvas.height;
+        const ctx = overlay.getContext("2d");
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+        // Dibujar Cruz (Azul cian muy visible)
+        ctx.strokeStyle = "#00FFFF"; 
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 3]); // Línea punteada
+
+        // Línea Vertical
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, overlay.height);
+        ctx.stroke();
+
+        // Línea Horizontal
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(overlay.width, y);
+        ctx.stroke();
+    }
+
+    function syncViews(sourceView, x, y) {
+        // Mapeo de coordenadas DICOM (Basado en main.py logic)
+        // Axial:   X=Sagital_Slice, Y=Coronal_Slice
+        // Coronal: X=Sagital_Slice, Y=Axial_Slice
+        // Sagital: X=Coronal_Slice, Y=Axial_Slice
+        
+        let updates = {};
+
+        if (sourceView === 'axial') {
+            updates['sagital'] = x; // El eje X del axial corresponde al corte Sagital
+            updates['coronal'] = y; // El eje Y del axial corresponde al corte Coronal
+        } else if (sourceView === 'coronal') {
+            updates['sagital'] = x;
+            updates['axial'] = y;   // La altura del coronal es la profundidad axial
+        } else if (sourceView === 'sagital') {
+            updates['coronal'] = x;
+            updates['axial'] = y;
+        }
+
+        // Aplicar actualizaciones a los sliders
+        Object.keys(updates).forEach(targetView => {
+            const slider = document.getElementById(`slider_${targetView}`);
+            const number = document.getElementById(`number_${targetView}`);
+            if (slider) {
+                // Validar límites
+                let val = Math.max(0, Math.min(updates[targetView], slider.max));
+                
+                // Solo actualizar si cambió significativamente (evitar parpadeo)
+                if (Math.abs(slider.value - val) > 0) {
+                    slider.value = val;
+                    number.value = val;
+                    // Llamamos a updateImage pero con debounce o flag para no saturar
+                    updateImage(targetView, val, true);
+                }
+            }
+        });
+    }
+
+    function bindInspector(view) {
+        const wrapper = document.getElementById(`card_${view}`).querySelector('.image-wrapper');
+        const mainCanvas = document.getElementById(`canvas_${view}`);
+        
+        if (!wrapper) return;
+
+        // Evento de Arrastre (Drag) para navegación fluida
+        wrapper.addEventListener('mousemove', (e) => {
+            // Solo si está activo el modo y se está presionando el clic (buttons === 1)
+            // O si prefieres que funcione solo con mover el mouse, quita "e.buttons === 1"
+            if (!viewState.inspectorMode || e.buttons !== 1) return;
+
+            const mapped = cssToPngPixels(mainCanvas, e);
+            if (!mapped) return;
+
+            // 1. Dibujar cruz en la vista actual
+            drawCrosshair(view, mapped.cssX, mapped.cssY);
+
+            // 2. Sincronizar las otras vistas
+            syncViews(view, mapped.xPix, mapped.yPix);
+        });
+        
+        // Evento Click simple (para posicionar sin arrastrar)
+        wrapper.addEventListener('mousedown', (e) => {
+            if (!viewState.inspectorMode) return;
+            const mapped = cssToPngPixels(mainCanvas, e);
+            if (!mapped) return;
+            drawCrosshair(view, mapped.cssX, mapped.cssY);
+            syncViews(view, mapped.xPix, mapped.yPix);
+        });
+        
+        // Limpiar al soltar
+        wrapper.addEventListener('mouseup', () => {
+             if (viewState.inspectorMode) {
+                 // Opcional: Si quieres que la cruz desaparezca al soltar, descomenta esto:
+                 // clearOverlay(view); 
+             }
+        });
+    }
+
     // --- INICIALIZACIÓN ---
     // Configura los spinners personalizados con sus funciones de actualización inmediata.
     setupCustomSpinner('minInput', 1, () => {
@@ -746,6 +964,7 @@ document.addEventListener('DOMContentLoaded', function() {
             setupSliceSlider(view);
             setupZoomPan(view); 
             bindHU(view);
+            bindInspector(view);
             updateImage(view, slider.value, true);
         }
     });

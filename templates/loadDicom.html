@@ -1,26 +1,44 @@
 {% extends "home.html" %}
 
 {% block content %}
-<div class="container mt-4 text-center">
-    <div class="card shadow-lg p-4 border-2 rounded-3" style="background-color: var(--gris-oscuro); border-color: var(--gris-fuerte);">
-        <h1 style="color: var(--gris-claro);">Cargar archivos DICOM</h1>
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8 col-lg-6"> <div class="card shadow-lg p-4 border-secondary text-center" style="background-color: var(--gris-panel);">
+                
+                <div class="mb-3">
+                    <i class="bi bi-folder2-open icon-udg-gold" style="font-size: 3rem;"></i>
+                </div>
+                
+                <h3 class="text-light fw-bold mb-2">Cargar Estudios DICOM</h3>
+                
+                <p class="text-instruction mb-4">
+                    Selecciona la carpeta raíz que contiene las imágenes del paciente.
+                </p>
+                
+                <form method="POST" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    
+                    <div class="input-group shadow-sm mb-3">
+                        <input type="file" name="folder"
+                            class="form-control bg-dark text-light border-secondary"
+                            id="inputGroupFile04" 
+                            aria-describedby="inputGroupFileAddon04"
+                            aria-label="Upload" 
+                            webkitdirectory directory multiple required>
+                        
+                        <button class="btn btn-udg" type="submit" id="inputGroupFileAddon04">
+                            <i class="bi bi-upload"></i> Subir
+                        </button>
+                    </div>
         
-        <form method="POST" enctype="multipart/form-data" class="mt-3">
-            
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="input-group">
-                <input type="file"  name="folder"
-                    class="form-control"
-                    id="inputGroupFile04" aria-describedby="inputGroupFileAddon04"
-                    aria-label="Upload" webkitdirectory directory multiple>
-                <div id="archivoSeleccionado" class="mt-2 text-light"></div>
-                <button class="btn btn-udg-dorado" type="submit" id="inputGroupFileAddon04">
-                    <i class="bi bi-upload"></i> Subir y ordenar
-                </button>
-            </div>    
-        </form>
+                    <div id="archivoSeleccionado" class="text-success-udg small" style="min-height: 24px;"></div>
+                </form>
+            </div>
+
+        </div>
     </div>
 </div>
+
 <script>
     const inputFile = document.querySelector('input[type="file"]');
     const nombreArchivo = document.getElementById('archivoSeleccionado');
@@ -28,13 +46,12 @@
     if (inputFile) {
         inputFile.addEventListener('change', () => {
             if (inputFile.files.length > 0) {
-                const nombres = Array.from(inputFile.files).map(f => f.name);
-                nombreArchivo.textContent = `Archivos seleccionados: ${nombres.slice(0, 3).join(', ')}${nombres.length > 3 ? ' y más...' : ''}`;
+                const totalFiles = inputFile.files.length;
+                nombreArchivo.innerHTML = `<i class="bi bi-check-circle-fill"></i> Se han seleccionado <strong>${totalFiles}</strong> archivos.`;
             } else {
                 nombreArchivo.textContent = '';
             }
         });
     }
 </script>
-
 {% endblock %}

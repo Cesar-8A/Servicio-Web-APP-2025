@@ -1,0 +1,15 @@
+# --- .gitignore ---
+# Ignorar carpetas de datos
+uploads/
+anonimizado/
+upload_nrrd/
+
+# Ignorar archivos temporales de Python
+__pycache__/
+*.py[cod]
+venv/
+.env
+
+# Ignorar archivos específicos del sistema
+.DS_Store
+Thumbs.db
