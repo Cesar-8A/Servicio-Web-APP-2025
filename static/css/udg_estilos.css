@@ -1,27 +1,31 @@
-/* =========================================
-   1. VARIABLES Y CONFIGURACIÓN BASE (HÍBRIDA)
-   ========================================= */
+/* ==========================================================================
+   UDG ESTILOS MAESTRO - VERSIÓN FINAL FORMAL
+   ========================================================================== */
+
+/* ==========================================================================
+   1. VARIABLES Y CONFIGURACIÓN BASE
+   ========================================================================== */
 :root {
-    /* --- PALETA MÉDICA (Para herramientas y UI general) --- */
+    /* --- PALETA MÉDICA (Interfaz de Trabajo - Sobriedad) --- */
     --color-primario: #0d6efd; /* Azul estándar */
     --color-activo:   #0a58ca; /* Azul oscuro hover */
     --color-acento:   #6ea8fe; /* Azul claro texto */
     
-    /* --- PALETA UDG (Identidad Institucional) --- */
-    --rojo-UDG:       #AE1C28;
-    --amarillo-UDG:   #FFD700;
+    /* --- PALETA UDG (Identidad Institucional - Branding) --- */
+    --rojo-UDG:       #AE1C28; /* Acciones principales */
+    --amarillo-UDG:   #FFD700; /* Logos, cargas y focos */
 
     /* --- NEUTROS (Modo Oscuro Profundo) --- */
-    --gris-fondo:     #121212;
-    --gris-panel:     #1e1e1e; 
-    --gris-borde:     #333333;
-    --gris-fuerte:    #2c2c2c; /* Usado en inputs */
-    --gris-medio:     #6c757d;
-    --gris-debil:     #adb5bd;
-    --gris-texto:     #e0e0e0;
+    --gris-fondo:     #121212; /* Fondo de página */
+    --gris-panel:     #1e1e1e; /* Fondo de tarjetas y barras */
+    --gris-borde:     #333333; /* Líneas divisorias */
+    --gris-fuerte:    #2c2c2c; /* Inputs y fondos secundarios */
+    --gris-medio:     #6c757d; /* Textos secundarios */
+    --gris-debil:     #adb5bd; /* Textos terciarios */
+    --gris-texto:     #e0e0e0; /* Texto principal */
     --gris-claro:     #ffffff;
 
-    /* Mapeo para compatibilidad con tu código legacy */
+    /* Mapeo de compatibilidad */
     --gris-oscuro:    var(--gris-panel);
 }
 
@@ -31,552 +35,496 @@ body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
-h1, h2, h3, h4, h5 {
-    color: var(--gris-claro);
-    font-weight: bold;
-}
+h1, h2, h3, h4, h5 { color: var(--gris-claro); font-weight: bold; }
 
-/* Utilidades */
+/* --- UTILIDADES --- */
 .hidden { display: none !important; }
 .shadow-udg { box-shadow: 0 0 10px rgba(174, 28, 40, 0.4); }
 .borde-udg { padding-left: 15px; border-left: 3px solid var(--rojo-UDG); }
 
-/* Textos de instrucción (Corrección de visibilidad) */
-.text-instruction {
-    color: var(--gris-debil);
-    font-size: 0.95rem;
-}
+.text-instruction { color: var(--gris-debil); font-size: 0.95rem; }
+.text-success-udg { color: var(--amarillo-UDG) !important; font-weight: bold; }
+.text-primary { color: var(--color-primario) !important; }
 
-/* Mensaje de éxito estilo UDG */
-.text-success-udg {
-    color: var(--amarillo-UDG) !important;
-    font-weight: bold;
-}
+/* Scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--gris-fondo); }
+::-webkit-scrollbar-thumb { background: var(--gris-borde); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gris-medio); }
 
-/* Icono Dorado */
-.icon-udg-gold {
-    color: var(--amarillo-UDG);
-    text-shadow: 0 2px 10px rgba(255, 215, 0, 0.2);
-}
 
-/* =========================================
+/* ==========================================================================
    2. PANTALLA DE CARGA (LOADER UDG)
-   ========================================= */
+   ========================================================================== */
 #loader-wrapper {
-    position: fixed;
-    top: 0; left: 0;
-    width: 100vw; height: 100vh;
-    background-color: var(--gris-fondo);
-    z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background-color: var(--gris-fondo); z-index: 9999;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
 }
-
 #loader {
-    border: 12px solid var(--amarillo-UDG);
-    border-top: 12px solid var(--rojo-UDG); 
-    border-bottom: 12px solid var(--rojo-UDG); 
-    border-radius: 50%;
-    width: 80px; height: 80px;
-    animation: spin 1s linear infinite;
+    border: 12px solid var(--amarillo-UDG); border-top: 12px solid var(--rojo-UDG); 
+    border-bottom: 12px solid var(--rojo-UDG); border-radius: 50%;
+    width: 80px; height: 80px; animation: spin 1s linear infinite;
 }
-
-#loader-logo {
-    width: 100px; height: 100px;
-    animation: pulse 1.5s infinite ease-in-out;
-}
-
+#loader-logo { width: 100px; height: 100px; animation: pulse 1.5s infinite ease-in-out; }
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.8; } 100% { transform: scale(1); opacity: 1; } }
 
-/* =========================================
+
+/* ==========================================================================
    3. BARRA DE NAVEGACIÓN
-   ========================================= */
+   ========================================================================== */
 .navbar {
     background-color: var(--gris-panel);
     border-bottom: 1px solid var(--gris-borde);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
-
-.navbar .navbar-brand {
-    font-size: 1.5rem;
-    color: var(--amarillo-UDG);
-    font-weight: bold;
+.navbar-brand {
+    font-size: 1.5rem; color: var(--amarillo-UDG); font-weight: bold;
+    border: 1px solid transparent; border-radius: 8px; transition: all 0.3s ease;
 }
-
-.navbar .navbar-toggler-icon { 
-    background-color: var(--gris-debil); 
-    border-radius: 4px;
+.navbar-brand:hover {
+    background-color: rgba(255, 215, 0, 0.1); border-color: var(--amarillo-UDG); transform: translateY(-1px);
 }
+.navbar .navbar-toggler-icon { background-color: var(--gris-debil); border-radius: 4px; }
 
-/* --- ESTILOS DE LOS BOTONES DEL MENÚ --- */
 .navbar .nav-link {
-    color: var(--gris-texto);
-    font-weight: 500;
-    padding: 8px 16px;      
-    margin: 0 4px;           
-    border: 1px solid transparent; 
-    border-radius: 6px;
-    transition: all 0.2s ease;
+    color: var(--gris-texto); font-weight: 500; padding: 8px 16px; margin: 0 4px;
+    border: 1px solid transparent; border-radius: 6px; transition: all 0.2s ease;
 }
-
 .navbar .nav-link:hover {
-    color: var(--amarillo-UDG);
-    border-color: var(--amarillo-UDG); 
-    background-color: rgba(255, 215, 0, 0.05); 
+    color: var(--amarillo-UDG); border-color: var(--amarillo-UDG); background-color: rgba(255, 215, 0, 0.05);
 }
-
-.navbar .nav-link:focus, 
-.navbar .nav-link:active,
-.navbar .nav-link.show {
-    color: var(--amarillo-UDG) !important;     
-    background-color: transparent !important;  
-    border-color: var(--amarillo-UDG) !important;
-    outline: none;                          
+.navbar .nav-link:focus, .navbar .nav-link:active, .navbar .nav-link.show {
+    color: var(--amarillo-UDG) !important; background-color: transparent !important;
+    border-color: var(--amarillo-UDG) !important; outline: none;
 }
+.navbar .dropdown-menu { background-color: var(--gris-panel); border: 1px solid var(--gris-borde); }
+.navbar .dropdown-item { color: var(--gris-debil); }
+.navbar .dropdown-item:hover { background-color: var(--gris-borde); color: var(--amarillo-UDG); }
 
-/* Dropdowns (Menús desplegables) */
-.navbar .dropdown-menu {
-    background-color: var(--gris-panel);
-    border: 1px solid var(--gris-borde);
-    margin-top: 10px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-}
-
-.navbar .dropdown-item {
-    color: var(--gris-texto);
-    transition: background-color 0.2s;
-}
-
-.navbar .dropdown-item:hover, 
-.navbar .dropdown-item:focus {
-    background-color: var(--gris-borde);
-    color: var(--amarillo-UDG);
-}
-
-/* Inputs del Navbar */
 .navbar .form-control {
-    background-color: var(--gris-borde);
-    border: 1px solid #444;
-    color: white;
+    background-color: var(--gris-borde); border: 1px solid #444; color: white;
 }
 .navbar .form-control:focus {
-    background-color: #444;
-    color: white;
-    outline: none;
-    border-color: var(--amarillo-UDG);
+    background-color: #444; color: white; outline: none; border-color: var(--amarillo-UDG);
 }
 
-/* =========================================
-   4. BOTONES Y TARJETAS
-   ========================================= */
+
+/* ==========================================================================
+   4. BOTONES Y TARJETAS (ESTILOS FORMALES COMPLETOS)
+   ========================================================================== */
 .card {
-    background-color: var(--gris-panel);
-    color: var(--gris-texto);
-    border: 1px solid var(--gris-borde);
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    background-color: var(--gris-panel); color: var(--gris-texto);
+    border: 1px solid var(--gris-borde); border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
-
+/* Base de botones */
 .btn {
-    border-radius: 6px;
-    padding: 0.5rem 1.2rem;
-    font-weight: 500;
-    transition: all 0.2s ease;
+    border-radius: 6px; padding: 0.5rem 1.2rem; font-weight: 500;
+    transition: all 0.2s ease; border: 1px solid transparent;
 }
 
-/* Botón Institucional (Rojo UDG) - Para acciones principales */
-.btn-udg, .btn-udg-rojo {
-    background-color: var(--rojo-UDG);
-    color: white;
-    border: none;
-}
+/* --- Botones Institucionales (Rojo UDG) --- */
+.btn-udg, .btn-udg-rojo { background-color: var(--rojo-UDG); color: white; }
 .btn-udg:hover, .btn-udg-rojo:hover {
-    background-color: #89171e;
-    color: var(--amarillo-UDG);
-    box-shadow: 0 0 10px rgba(174, 28, 40, 0.4);
+    background-color: #89171e; color: var(--amarillo-UDG); box-shadow: 0 0 10px rgba(174, 28, 40, 0.4);
 }
 
 /* Botón Dorado UDG */
-.btn-udg-dorado {
-    background-color: var(--amarillo-UDG);
-    color: black;
-    border: none;
-}
+.btn-udg-dorado { background-color: var(--amarillo-UDG); color: black; }
 .btn-udg-dorado:hover { background-color: #e0c300; }
 
-/* Botón Médico/Secundario (Azul/Gris) - Para herramientas */
-.btn-secondary {
-    background-color: var(--gris-borde);
-    color: var(--gris-texto);
-    border: 1px solid #444;
+/* --- Botones Médicos/Secundarios (Estilo Ghost Azulado - RECUPERADO) --- */
+.btn-secondary, .btn-outline-secondary, .btn-outline-light {
+    background-color: rgba(13, 110, 253, 0.15); /* Fondo azul sutil transparente */
+    border: 1px solid rgba(13, 110, 253, 0.3);  /* Borde azul sutil */
+    color: var(--color-acento);                 /* Texto azul claro */
+    backdrop-filter: blur(5px);
 }
-.btn-secondary:hover {
-    background-color: #444;
+.btn-secondary:hover, .btn-outline-secondary:hover, .btn-outline-light:hover {
+    background-color: rgba(13, 110, 253, 0.3); /* Azul más intenso al hover */
+    border-color: var(--color-primario);
     color: white;
-    border-color: var(--color-acento);
+    transform: translateY(-1px);
 }
 
-/* Botones estándar Bootstrap override */
-.btn-danger { background-color: #dc3545; border: none; }
-.btn-success { background-color: #198754; border: none; }
-.btn-primary { background-color: var(--color-primario); border: none; }
+/* --- Botones Formales de Acción (Inferiores en Anonimizar) --- */
+.btn-formal {
+    border-radius: 6px; padding: 0.6rem 1.5rem; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 8px;
+    text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.5px;
+}
+/* Volver (Gris) */
+.btn-formal-gray { background-color: transparent; border: 1px solid var(--gris-borde); color: var(--gris-debil); }
+.btn-formal-gray:hover { background-color: #333; color: white !important; border-color: #555; }
+/* Guardar (Azul) */
+.btn-formal-blue { background-color: rgba(13, 110, 253, 0.1); border: 1px solid var(--color-primario); color: var(--color-primario); }
+.btn-formal-blue:hover { background-color: var(--color-primario); color: white !important; }
+/* Exportar (Verde - RECUPERADO) */
+.btn-formal-green { background-color: #198754; border: 1px solid #198754; color: white; }
+.btn-formal-green:hover { background-color: #146c43; box-shadow: 0 4px 12px rgba(25, 135, 84, 0.3); }
+/* Acción Peligrosa (Rojo) */
+.btn-formal-red { background-color: rgba(220, 53, 69, 0.1); border: 1px solid #dc3545; color: #dc3545; }
+.btn-formal-red:hover { background-color: #dc3545; color: white !important; }
 
-/* =========================================
-   5. INPUT FILE (DISEÑO PROFESIONAL)
-   ========================================= */
-/* Contenedor del input */
-.input-group .form-control[type="file"], input[type="file"].form-control {
-    background-color: var(--gris-panel);
-    color: var(--gris-texto);
-    border: 2px solid var(--gris-borde);
-    border-radius: 8px;
-    padding: 0.5rem;
-    box-shadow: none;
-    height: auto;
+/* --- Botón Excluir Sutil (En tabla de Anonimizar) --- */
+.btn-subtle-danger {
+    border: 1px solid var(--gris-borde); color: var(--gris-debil); background: transparent; transition: all 0.2s ease;
+}
+.btn-subtle-danger:hover {
+    background-color: rgba(220, 53, 69, 0.1); color: #dc3545; border-color: #dc3545;
 }
 
-/* Hover del contenedor */
-.input-group .form-control[type="file"]:hover, input[type="file"].form-control:hover {
-    border-color: var(--color-acento);
-    background-color: #252525;
-    cursor: pointer;
+/* Overrides de Bootstrap */
+.btn-primary { background-color: var(--color-primario) !important; border-color: var(--color-primario) !important; color: white; }
+.btn-primary:hover { background-color: var(--color-activo) !important; border-color: var(--color-activo) !important; }
+.btn-danger { background-color: #dc3545; }
+.btn-success { background-color: #198754; }
+
+
+/* ==========================================================================
+   5. INPUTS Y FORMULARIOS
+   ========================================================================== */
+/* Inputs Generales */
+.form-control, input[type="search"], input[type="number"], input[type="text"] {
+    background-color: var(--gris-fondo) !important;
+    border: 1px solid var(--gris-borde) !important;
+    color: var(--gris-texto) !important;
+    border-radius: 6px; box-shadow: none !important;
+}
+.form-control:focus, input:focus {
+    border-color: var(--color-primario) !important;
+    background-color: #000 !important;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25) !important;
+    outline: none;
+}
+::placeholder { color: var(--gris-medio) !important; opacity: 0.7; }
+
+/* --- INPUT GROUP INTEGRADO (Para LoadDicom Formal - RECUPERADO) --- */
+.input-group-integrated {
+    display: flex; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border-radius: 8px; overflow: hidden;
+}
+.input-group-integrated .form-control {
+    border-top-right-radius: 0 !important; border-bottom-right-radius: 0 !important; border-right: none;
+    background-color: var(--gris-panel) !important; color: transparent !important; flex-grow: 1;
+}
+.input-group-integrated .btn-upload {
+    border-top-left-radius: 0 !important; border-bottom-left-radius: 0 !important;
+    background-color: var(--rojo-UDG); color: white; border: 1px solid var(--rojo-UDG);
+    padding: 0.6rem 1.5rem; font-weight: bold; letter-spacing: 0.5px; transition: all 0.2s ease;
+}
+.input-group-integrated .btn-upload:hover {
+    background-color: #89171e; color: var(--amarillo-UDG);
 }
 
-/* Botón interno "Seleccionar archivo" */
+/* --- INPUT FILE ESTÁNDAR (Limpio) --- */
+input[type="file"].form-control {
+    background-color: var(--gris-panel) !important; padding: 0.5rem; height: auto;
+    color: transparent !important; 
+}
+input[type="file"].form-control:hover {
+    border-color: var(--color-acento) !important; background-color: #252525 !important; cursor: pointer;
+}
 input[type="file"]::file-selector-button {
-    background-color: var(--color-primario); /* Azul médico */
-    color: white;
-    border: none;
-    padding: 0.4rem 1rem;
-    margin-right: 1rem;
-    border-radius: 4px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background-color 0.2s ease;
+    background-color: var(--gris-borde) !important; color: white !important;
+    border: 1px solid #555; padding: 0.4rem 1rem; margin-right: 1rem; border-radius: 4px; font-weight: 600; cursor: pointer; transition: all 0.2s ease;
 }
-
 input[type="file"]::file-selector-button:hover {
-    background-color: var(--color-activo);
+    background-color: #4a4a50 !important; border-color: #777;
+}
+input[type="file"]:focus::file-selector-button {
+    background-color: var(--gris-borde) !important; color: white !important;
+    outline: 2px solid var(--color-primario); outline-offset: 2px;
 }
 
-/* Botón de carga adjunto (Addon) */
-button#inputGroupFileAddon04 {
-    background-color: var(--amarillo-UDG); /* Toque UDG */
-    color: black;
-    border: 2px solid var(--amarillo-UDG);
-    font-weight: bold;
+/* Corrección específica para sidebar */
+#plugins-sidebar input[type="file"].form-control { padding: 0.25rem; border: 1px solid var(--gris-medio); }
+#plugins-sidebar input[type="file"]::file-selector-button {
+    background-color: var(--color-primario) !important; padding: 0.1rem 0.5rem; font-size: 0.8rem; margin-right: 0.5rem; border: none;
 }
-button#inputGroupFileAddon04:hover {
-    background-color: var(--rojo-UDG);
-    color: white;
-    border-color: var(--rojo-UDG);
+#plugins-sidebar input[type="file"]::file-selector-button:hover {
+    background-color: var(--color-activo) !important;
 }
 
-#archivoSeleccionado {
-    color: var(--amarillo-UDG);
-    font-weight: 500;
-    margin-top: 10px;
-}
 
-/* =========================================
-   6. TABLAS (MODO OSCURO - DARK MODE)
-   ========================================= */
+/* ==========================================================================
+   6. TABLAS (DARK MODE TOTAL Y FORMAL)
+   ========================================================================== */
 .table-container-card {
-    background-color: var(--gris-panel);
-    border: 1px solid var(--gris-borde);
-    border-radius: 12px;
-    padding: 2rem;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    background-color: var(--gris-panel); border: 1px solid var(--gris-borde); border-radius: 12px; padding: 2rem;
 }
-
 .table-container-card h1 {
-    color: var(--amarillo-UDG);
-    font-weight: 700;
-    margin-bottom: 1.5rem;
-    text-transform: uppercase;
-    font-size: 1.5rem;
-    letter-spacing: 1px;
+    color: var(--gris-texto); font-weight: 700; margin-bottom: 1.5rem;
+    text-transform: uppercase; font-size: 1.2rem; letter-spacing: 2px;
+    border-bottom: 1px solid var(--gris-borde); padding-bottom: 15px;
 }
 
-/* Tabla General */
-.table {
-    color: var(--gris-texto);
-    border-color: var(--gris-borde);
-    vertical-align: middle;
-}
-
-/* Estilo UDG Oscuro */
+/* --- Tabla UDG (Resultados DICOM) - Estilo Sobrio --- */
 .table.udg-style {
-    background-color: #1a1a1a; /* Fondo muy oscuro */
-    border-radius: 8px;
-    overflow: hidden;
-    border: 1px solid var(--gris-borde);
+    background-color: #161616; border-radius: 6px; overflow: hidden; border: 1px solid #333;
+    width: 100%; border-collapse: separate; border-spacing: 0;
 }
-
-.table.udg-style thead {
-    background-color: #000; /* Encabezado negro */
-    color: var(--amarillo-UDG); /* Texto dorado */
-    text-transform: uppercase;
-    font-size: 0.9rem;
-    letter-spacing: 1px;
+.table.udg-style thead th {
+    background-color: #222 !important; color: #b0b0b0 !important; /* Gris claro, no blanco puro */
+    font-weight: 600; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 1px; padding: 15px; border-bottom: 1px solid #444 !important;
 }
-
 .table.udg-style tbody td {
-    background-color: var(--gris-panel);
-    color: var(--gris-texto);
-    border-bottom: 1px solid var(--gris-borde);
-    padding: 1rem;
+    background-color: #161616; color: #e0e0e0; border-bottom: 1px solid #2a2a2a; padding: 12px 15px;
+    transition: background-color 0.2s ease; border-left: 4px solid transparent;
+}
+/* Hover Formal (Gris neutro, NO azul) */
+.table.udg-style tbody tr:hover td {
+    background-color: #1f1f1f !important; cursor: pointer;
+}
+/* Fila Activa (Gris destacado con acento rojo sutil) */
+.table-active-row td {
+    background-color: #2a2a2a !important; color: white !important; font-weight: 600;
+    border-left-color: var(--rojo-UDG) !important; /* Línea roja elegante */
+}
+
+/* --- Tabla Anonimización (Oscura Formal) --- */
+#tabla-container {
+    background-color: var(--gris-panel); border-radius: 12px; padding: 2rem; border: 1px solid var(--gris-borde); box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+#tabla-container table { width: 100%; border-collapse: collapse; }
+#tabla-container thead th {
+    background-color: #000000 !important; color: white !important;
+    padding: 1rem; text-transform: uppercase; font-size: 0.8rem; border-bottom: 1px solid #333;
+}
+/* Encabezados de Sección (Ej. PATIENTNAME) */
+#tabla-container tr.section-header td {
+    background-color: #1a1a1a !important; color: var(--color-acento) !important;
+    font-weight: 700; font-family: 'Consolas', monospace; text-align: center;
+    padding: 0.8rem; border-bottom: 1px solid #333; border-top: 1px solid #333;
+}
+/* Filas de Datos */
+#tabla-container tr.data-row td {
+    background-color: var(--gris-panel); padding: 0.8rem; border: none; border-bottom: 1px solid #2a2a2a;
+}
+/* Inputs en tabla */
+/* 4. Input de Texto (Integrado y Formal) */
+#tabla-container input[type="text"] {
+    background-color: #121212;       /* Fondo muy oscuro */
+    border: 1px solid #444;          /* Borde gris sutil (NO BLANCO) */
+    color: #e0e0e0;                  /* Texto gris claro */
+    border-radius: 4px;
+    padding: 0.5rem 0.8rem;
+    width: 100%;
     transition: all 0.2s ease;
 }
 
-/* Hover suave (No amarillo chillón) */
-.table.udg-style tbody tr:hover td {
-    background-color: #2c2c2c; /* Un poco más claro */
-    color: white;
-    cursor: pointer;
-    border-left: 3px solid var(--rojo-UDG); /* Indicador sutil de selección */
+#tabla-container input[type="text"]:focus {
+    background-color: #000;
+    border-color: var(--color-primario); /* Azul al escribir */
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.1); /* Resplandor muy suave */
+    outline: none;
 }
 
-/* Fila seleccionada (JavaScript le pondrá esta clase) */
-.table-active-row td {
-    background-color: #2c2c2c !important;
-    color: var(--color-acento) !important; /* Azul médico */
-    font-weight: bold;
-    border-left: 3px solid var(--color-primario) !important;
+#tabla-container input[type="text"]::placeholder {
+    color: #555; /* Placeholder discreto */
 }
 
-/* Texto de selección */
-#selectedText {
-    color: var(--color-acento); /* Azul claro */
-    font-weight: 500;
-    margin-top: 1.5rem;
-    font-size: 1.1rem;
-}
 
-/* =========================================
-   7. LAYOUT DEL VISOR (INTACTO)
-   ========================================= */
-#viewer-wrapper {
-    max-width: 100%; /* Aprovecha toda la pantalla */
-    margin: 0;
-    height: calc(100vh - 56px); /* Altura exacta menos navbar */
-}
+/* ==========================================================================
+   7. LAYOUT DEL VISOR
+   ========================================================================== */
+#viewer-wrapper { max-width: 100%; margin: 0; height: calc(100vh - 56px); }
+#viewer-container { display: flex; height: 100%; width: 100%; }
 
-#viewer-container {
-    display: flex;
-    height: 100%;
-    width: 100%;
-}
-
-/* Barra Lateral (Rediseñada pero estructuralmente igual) */
+/* Barra Lateral */
 #plugins-sidebar {
-    flex-basis: 320px; 
-    flex-shrink: 0;
-    padding: 1rem;
-    overflow-y: auto;
-    background-color: var(--gris-panel) !important;
-    border-right: 1px solid var(--gris-borde) !important;
+    flex-basis: 320px; flex-shrink: 0; padding: 1rem;
+    background-color: var(--gris-panel) !important; border-right: 1px solid var(--gris-borde) !important;
+    overflow: hidden !important; display: flex; flex-direction: column;
 }
-
-#quadrant-grid-wrapper {
-    flex-grow: 1;
-    padding: 0.5rem;
-    min-width: 0;
-    background-color: black;
+.sidebar-fixed-content { flex-shrink: 0; overflow-y: auto; max-height: 60vh; }
+#active-tool-panel {
+    overflow-y: auto; padding-right: 5px; flex-grow: 1;
+    scrollbar-width: thin; scrollbar-color: var(--gris-borde) transparent;
 }
-
-#quadrant-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr;
-    gap: 0.5rem;
-    height: 100%;
-    width: 100%;
+#active-tool-panel > div {
+    margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid var(--gris-borde);
+    background-color: #181818 !important; border: 1px solid #333; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    animation: fadeIn 0.3s ease;
 }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 
+/* Grid */
+#quadrant-grid-wrapper { flex-grow: 1; padding: 0.5rem; min-width: 0; background-color: black; }
+#quadrant-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 0.5rem; height: 100%; width: 100%; }
 .quadrant-card {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    width: 100%;
-    overflow: hidden;
-    border: 1px solid var(--gris-borde);
-    background-color: var(--gris-fondo);
+    display: flex; flex-direction: column; height: 100%; width: 100%;
+    overflow: hidden; border: 1px solid var(--gris-borde); background-color: var(--gris-fondo);
 }
-
-.quadrant-card .card-body {
-    display: flex;
-    flex-direction: column;
-    flex-grow: 1;
-    min-height: 0;
-    padding: 0 !important; /* Maximizar espacio */
-}
+.quadrant-card .card-body { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; padding: 0 !important; }
 
 /* Contenedores de imagen */
 .image-wrapper, .iframe-wrapper {
-    flex-grow: 1;
-    position: relative;
-    min-height: 0;
-    width: 100%;
-    background-color: black;
-    overflow: hidden;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    flex-grow: 1; position: relative; min-height: 0; width: 100%;
+    background-color: black; overflow: hidden; display: flex; justify-content: center; align-items: center;
 }
-
 .image-wrapper canvas, .iframe-wrapper iframe {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    object-fit: contain;
-    pointer-events: auto;
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    object-fit: contain; pointer-events: auto; cursor: grab;
+    image-rendering: auto; image-rendering: -webkit-optimize-contrast;
 }
+.image-wrapper canvas:active { cursor: grabbing; }
+#overlay_axial, #overlay_sagital, #overlay_coronal { pointer-events: none; }
 
-/* Overlay para dibujar */
-#overlay_axial, #overlay_sagital, #overlay_coronal {
-    pointer-events: none; 
-}
-
-/* Pantalla Completa (CRÍTICO: No borrar) */
 .fullscreen-active {
-    position: fixed;
-    top: 0; left: 0;
-    width: 100vw; height: 100vh;
-    background-color: black;
-    z-index: 1050;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background-color: black; z-index: 1050; padding: 0;
+    display: flex; flex-direction: column;
 }
 .fullscreen-active .card-body { height: 100%; padding: 0; }
 
-/* =========================================
-   8. NUEVA BARRA DE HERRAMIENTAS (SIDEBAR)
-   ========================================= */
-/* Grupos de herramientas */
+
+/* ==========================================================================
+   8. BARRA DE HERRAMIENTAS (SIDEBAR WIDGETS)
+   ========================================================================== */
 .sidebar-group {
-    background-color: rgba(0,0,0,0.2);
-    border: 1px solid var(--gris-borde);
-    border-radius: 8px;
-    padding: 10px;
-    margin-bottom: 12px;
+    background-color: rgba(0,0,0,0.2); border: 1px solid var(--gris-borde);
+    border-radius: 8px; padding: 8px; margin-bottom: 8px;
 }
-
 .sidebar-group-title {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    color: var(--gris-medio);
-    margin-bottom: 8px;
-    border-bottom: 1px solid var(--gris-borde);
-    padding-bottom: 2px;
+    font-size: 0.65rem; text-transform: uppercase; color: var(--gris-medio);
+    margin-bottom: 6px; border-bottom: 1px solid var(--gris-borde); padding-bottom: 2px;
 }
 
-/* Botones Icono (Cuadrados) */
+/* Botones Icono */
 .btn-icon {
-    width: 42px; height: 42px;
-    padding: 0;
-    display: inline-flex;
-    align-items: center; justify-content: center;
-    font-size: 1.2rem;
-    margin: 2px;
-    border-radius: 6px;
-    background-color: var(--gris-borde);
-    color: var(--gris-debil);
+    width: 42px; height: 42px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 1.2rem; margin: 2px; border-radius: 6px;
+    background-color: var(--gris-borde); color: var(--gris-debil);
     border: 1px solid transparent;
 }
-
+/* Hover Azul Médico */
 .btn-icon:hover {
-    background-color: #444;
-    color: white;
-    transform: scale(1.05);
+    border-color: var(--color-acento) !important; color: white !important;
+    background-color: rgba(13, 110, 253, 0.2) !important;
+    box-shadow: 0 0 10px rgba(13, 110, 253, 0.3); transform: translateY(-1px);
+}
+/* Activo Azul Médico (Sin amarillo) */
+.btn-icon.btn-udg-rojo, .btn-icon.btn-udg-rojo:hover, .btn-icon.btn-udg-rojo:focus {
+    background-color: var(--color-primario) !important;
+    color: white !important; border-color: var(--color-acento) !important;
+    box-shadow: 0 0 12px rgba(13, 110, 253, 0.6) !important; transform: scale(1.05);
 }
 
-/* Estado Activo del Botón (Azul Médico) */
-.btn-icon.btn-udg-rojo { /* Mantenemos nombre de clase JS, cambiamos estilo */
-    background-color: var(--color-activo);
-    color: white;
-    border-color: var(--color-acento);
-    box-shadow: 0 0 8px rgba(13, 110, 253, 0.4);
+/* Corrección de textos y Títulos */
+#plugins-sidebar .text-muted, #plugins-sidebar .form-label, #plugins-sidebar small { color: #b0b0b0 !important; }
+
+.tool-panel-title {
+    background-color: rgba(255, 255, 255, 0.05); padding: 8px 10px;
+    border-radius: 4px; margin-bottom: 12px; border-left: 3px solid var(--color-acento);
+    color: white !important; font-size: 0.85rem; font-weight: bold; text-transform: uppercase;
+    letter-spacing: 1px; display: flex; align-items: center; gap: 8px;
 }
 
-/* Corrección de textos invisibles en el sidebar */
-#plugins-sidebar .text-muted, 
-#plugins-sidebar .form-label,
-#plugins-sidebar small {
-    color: #a0a0a0 !important; /* Gris claro para leerse bien */
+
+/* ==========================================================================
+   9. WIDGETS ESPECÍFICOS
+   ========================================================================== */
+#huPickerPluginContainer .alert {
+    background-color: rgba(255, 255, 255, 0.02) !important;
+    border: none;
+    padding: 0; 
+    margin-bottom: 0;
 }
-
-/* Espaciado de paneles activos */
-#active-tool-panel > div {
-    margin-bottom: 15px;
-    padding-bottom: 15px;
-    border-bottom: 1px solid var(--gris-borde);
-    animation: fadeIn 0.3s ease;
-}
-
-@keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
-
-/* =========================================
-   9. WIDGETS ESPECÍFICOS (Window/HU/Curva)
-   ========================================= */
-/* Panel HU */
+/* Panel HU (Monitor) */
 #huResult {
-    font-family: 'Consolas', monospace;
+    background-color: #050505 !important; /* Negro profundo */
+    color: #ffffff !important;            /* Texto blanco puro */
+    
+    /* Borde técnico: Gris oscuro con acento Azul a la izquierda */
+    border: 1px solid #333;
+    border-left: 3px solid var(--color-primario); 
+    
+    border-radius: 6px;
+    padding: 12px;
+    
+    /* Tipografía de consola/código para números */
+    font-family: 'Consolas', 'Courier New', monospace;
     font-size: 0.85rem;
-    color: var(--color-acento) !important;
-    background-color: rgba(0,0,0,0.4);
-    padding: 8px;
-    border-radius: 4px;
-    border: 1px solid var(--gris-borde);
+    
+    /* Efecto de pantalla hundida */
+    box-shadow: inset 0 0 20px rgba(0,0,0,1); 
 }
 
-/* Presets Window/Level */
-.btn-group-presets {
-    width: 100%; display: flex;
+#huInfo {
+    color: var(--color-acento) !important; 
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    padding-left: 4px;
+    opacity: 0.9;
 }
-.btn-group-presets .btn {
-    flex: 1; border-radius: 0;
-    border-color: var(--gris-borde);
-    color: var(--gris-debil);
+
+/* Etiquetas (X, Y, Z, Densidad) */
+#huResult .text-muted, 
+#huResult .text-secondary {
+    color: #888 !important; /* Gris medio legible */
 }
+
+/* Valores de Coordenadas */
+#huResult span.text-light {
+    color: #ffffff !important;
+}
+
+#huResult .text-info {
+    color: #0dcaf0 !important; /* Cyan brillante para el valor HU */
+    text-shadow: 0 0 5px rgba(13, 202, 240, 0.4); /* Pequeño resplandor */
+}
+
+/* Líneas divisorias internas */
+#huResult .border-top {
+    border-color: #333 !important;
+}
+
+/* Presets */
+.btn-group-presets { width: 100%; display: flex; }
+.btn-group-presets .btn { flex: 1; border-radius: 0; border-color: var(--gris-borde); color: var(--gris-debil); }
 .btn-group-presets .btn:first-child { border-radius: 4px 0 0 4px; }
 .btn-group-presets .btn:last-child { border-radius: 0 4px 4px 0; }
-
-/* Preset Activo (Azul) */
 .preset-active {
-    background-color: var(--color-primario) !important;
-    border-color: var(--color-primario) !important;
-    color: white !important;
+    background-color: var(--color-primario) !important; border-color: var(--color-primario) !important;
+    color: white !important; font-weight: bold; box-shadow: inset 0 3px 5px rgba(0,0,0,0.2);
 }
 
 /* Spinners Numéricos */
-.custom-spinner .btn { padding: 0.1rem 0.4rem; }
-.custom-spinner input { background-color: var(--gris-fondo) !important; border-color: var(--gris-borde); color: white !important; }
+.custom-spinner input[type='number']::-webkit-inner-spin-button, .custom-spinner input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.custom-spinner input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
+.custom-spinner input {
+    background-color: var(--gris-fondo) !important; border-color: var(--gris-borde); color: white !important;
+    padding: 0 2px !important; text-align: center; font-weight: bold; min-width: 0;
+}
+.custom-spinner .btn { padding: 0.1rem 0.5rem; z-index: 2; display: flex; align-items: center; justify-content: center; }
 
-/* Editor de Curvas */
+/* Editor de Curvas (Histograma) */
 #curve-editor-wrapper {
-    width: 100%;
-    border: 1px solid var(--gris-borde);
-    border-radius: 4px;
-    position: relative;
-    background-color: black;
-    aspect-ratio: 1.3/1;
+    width: 100%; border: 1px solid var(--gris-borde); border-radius: 4px; position: relative; background-color: black;
 }
+#contrastEditorContainer .btn-outline-success { border-color: #198754 !important; color: #198754 !important; }
+#contrastEditorContainer .btn-outline-success:hover { background-color: #198754 !important; color: white !important; }
+#contrastEditorContainer .btn-outline-danger { border-color: #dc3545 !important; color: #dc3545 !important; }
+#contrastEditorContainer .btn-outline-danger:hover { background-color: #dc3545 !important; color: white !important; }
+#contrastEditorContainer .btn-outline-warning { border-color: #ffc107 !important; color: #ffc107 !important; }
+#contrastEditorContainer .btn-outline-warning:hover { background-color: #ffc107 !important; color: black !important; }
+#contrastEditorContainer .btn-outline-secondary { border-color: #6c757d; color: #e0e0e0; }
+#contrastEditorContainer .btn-outline-secondary:hover { background-color: #6c757d; color: white; }
 
-/* --- ESTILO BOTÓN HOME --- */
-.navbar-brand {
-    border: 1px solid transparent;
-    border-radius: 8px;
-    transition: all 0.3s ease;
+/* Acordeón Metadata */
+.accordion-button::after { filter: invert(1); transform: scale(0.7); }
+.accordion-button:not(.collapsed) { background-color: var(--gris-borde) !important; color: var(--amarillo-UDG) !important; box-shadow: none; }
+#collapseMeta .accordion-body { padding: 5px !important; overflow: hidden !important; }
+#metadataList {
+    display: block !important; width: 100% !important; max-height: 350px !important; overflow-y: auto !important;
+    padding-right: 5px !important; margin-bottom: 0 !important;
 }
-.custom-spinner input[type='number'] { -moz-appearance: textfield; }
-
-.navbar-brand:hover {
-    background-color: rgba(255, 215, 0, 0.1); 
-    border-color: var(--amarillo-UDG);  
-    transform: translateY(-1px);           
+#metadataList li {
+    display: flex !important; justify-content: space-between !important;
+    padding: 6px 4px !important; border-bottom: 1px solid #333 !important; font-size: 0.8rem !important;
 }
+#metadataList span.val { color: var(--color-acento); text-align: right; font-weight: bold; margin-left: 10px; word-break: break-word; }

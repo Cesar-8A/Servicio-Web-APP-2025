@@ -70,33 +70,26 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     contrastState.lut = new Uint8ClampedArray(256).map((_, i) => i);
 
-    // --- LÓGICA DE PLUGINS DE LA BARRA LATERAL ---
+    // --- LÓGICA DE PLUGINS (Versión Limpia) ---
     function setupPluginButton(btnId, containerId, onToggleCallback) {
         const btn = document.getElementById(btnId);
-        // containerId puede ser null para botones toggle sin panel (como el Inspector)
         const container = containerId ? document.getElementById(containerId) : null;
         
-        if (!btn) return; // Si no hay botón, salir
+        if (!btn) return;
 
         btn.addEventListener('click', () => {
-            // Manejo visual del botón activo
-            // Nota: Usamos una clase temporal 'active-tool' o verificamos el estilo
-            // Aquí asumimos tu lógica de toggle con btn-udg-rojo
             const isActive = btn.classList.contains('btn-udg-rojo');
             
-            // Toggle estado
             if (isActive) {
+                // DESACTIVAR
                 btn.classList.remove('btn-udg-rojo');
-                // btn.classList.add('btn-secondary'); // Opcional, si usas esa clase base
                 if (container) container.style.display = 'none';
             } else {
+                // ACTIVAR
                 btn.classList.add('btn-udg-rojo');
-                // btn.classList.remove('btn-secondary'); 
                 if (container) container.style.display = 'block';
             }
 
-            // Callback con el nuevo estado (invertido porque acabamos de cambiarlo arriba? 
-            // No, isActive era el estado ANTERIOR. El nuevo estado es !isActive)
             if (onToggleCallback) onToggleCallback(!isActive);
         });
     }
@@ -148,26 +141,33 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- LÓGICA DE AJUSTE DE VENTANA (WW/WC) ---
     const wwSlider = document.getElementById('ww_slider');
     const wcSlider = document.getElementById('wc_slider');
-    const minInput = document.getElementById('minInput');
-    const maxInput = document.getElementById('maxInput');
-    const levelInput = document.getElementById('levelInput');
-    const windowInput = document.getElementById('windowInput');
 
     function updateWWWC(ww, wc, updateSource = null) {
         viewState.ww = Math.max(1, ww);
         viewState.wc = wc;
-        const min = viewState.wc - viewState.ww / 2;
-        const max = viewState.wc + viewState.ww / 2;
+        
+        // Actualizar la posición visual de las barras (Solo si no las estamos moviendo nosotros)
         if (updateSource !== 'sliders') {
             if(wwSlider) wwSlider.value = viewState.ww;
             if(wcSlider) wcSlider.value = viewState.wc;
         }
+        
+        // Actualizar los inputs numéricos de arriba (Solo si no estamos escribiendo en ellos)
         if (updateSource !== 'fields') {
-            if(minInput) minInput.value = Math.round(min);
-            if(maxInput) maxInput.value = Math.round(max);
-            if(levelInput) levelInput.value = Math.round(viewState.wc);
-            if(windowInput) windowInput.value = Math.round(viewState.ww);
+            const levelIn = document.getElementById('levelInput');
+            const windowIn = document.getElementById('windowInput');
+            if(levelIn) levelIn.value = Math.round(viewState.wc);
+            if(windowIn) windowIn.value = Math.round(viewState.ww);
         }
+
+        //--- Actualizar SIEMPRE los textos pequeños al lado del título ---
+        // Esto debe ocurrir sin importar de dónde venga el cambio
+        const wwDisp = document.getElementById('ww_val_display');
+        const wcDisp = document.getElementById('wc_val_display');
+        if (wwDisp) wwDisp.textContent = viewState.ww;
+        if (wcDisp) wcDisp.textContent = viewState.wc;
+        // -----------------------------------------------------------------------------
+
         VIEWS.forEach(view => updateImage(view, document.getElementById(`slider_${view}`)?.value, true));
     }
     
@@ -219,9 +219,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Event Listeners para los botones (Asegúrate de reemplazar los anteriores si existían)
+    // Listeners para Presets
     document.getElementById('presetBtnLung')?.addEventListener('click', () => {
-        updateWWWC(1500, -600); // Nota: aquí usamos updateWWWC en lugar de applyWindowLevel si esa es tu función original
+        updateWWWC(1500, -600);
         highlightPreset('presetBtnLung');
     });
     
@@ -234,21 +234,15 @@ document.addEventListener('DOMContentLoaded', function() {
         updateWWWC(400, 40);
         highlightPreset('presetBtnSoftTissue');
     });
-
-    // Modificamos los listeners de los sliders para que "apaguen" los botones si mueves manual
     
     wwSlider?.addEventListener('input', () => {
-        // Tu lógica existente para actualizar WW...
-        highlightPreset(null); // Apaga todos los botones
-        const disp = document.getElementById('ww_val_display');
-        if(disp) disp.textContent = wwSlider.value;
+        updateWWWC(parseInt(wwSlider.value), parseInt(wcSlider.value), 'sliders');
+        highlightPreset(null); // Apagar botones
     });
     
     wcSlider?.addEventListener('input', () => {
-        // Tu lógica existente para actualizar WC...
-        highlightPreset(null); // Apaga todos los botones
-        const disp = document.getElementById('wc_val_display');
-        if(disp) disp.textContent = wcSlider.value;
+        updateWWWC(parseInt(wwSlider.value), parseInt(wcSlider.value), 'sliders');
+        highlightPreset(null); // Apagar botones
     });
 
 
@@ -645,8 +639,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!wrapper) return;
         
         wrapper.addEventListener("click", (evt) => {
+            if (zoomState[view] && zoomState[view].isDragging) {
+                return; // Fue un arrastre, no un clic de selección
+            }
+
             // Si estábamos arrastrando (pan), no dispares el HU
-            // (Aunque desactivamos el arrastre manual, esto es buena seguridad)
             if (!viewState.huMode || (zoomState[view] && zoomState[view].isDragging)) return;
             
             VIEWS.forEach(clearOverlay);
@@ -666,7 +663,23 @@ document.addEventListener('DOMContentLoaded', function() {
                         huResult.textContent = "Error: " + data.error;
                         return;
                     }
-                    huResult.innerHTML = `Voxel (X, Y, Z): ${data.voxel.x}, ${data.voxel.y}, ${data.voxel.z}<br>Valor HU: ${data.hu}`;
+                    // --- MEJORA DE FORMATO HU ---
+                    huResult.innerHTML = `
+                        <div class="mb-1 lh-1">
+                            <span style="color: #bbbbbb; font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase;">Coordenadas:</span>
+                        </div>
+                        
+                        <div class="d-flex justify-content-between mb-2 font-monospace px-1" style="font-size: 0.9rem;">
+                            <span><span style="color: #777;">x:</span> <span style="color: #fff;">${data.voxel.x}</span></span>
+                            <span><span style="color: #777;">y:</span> <span style="color: #fff;">${data.voxel.y}</span></span>
+                            <span><span style="color: #777;">z:</span> <span style="color: #fff;">${data.voxel.z}</span></span>
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center pt-2" style="border-top: 1px solid #444;">
+                            <span style="color: #bbbbbb; font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase;">Densidad:</span>
+                            <span style="color: #0dcaf0; font-weight: bold; font-size: 1rem;">${data.hu} HU</span>
+                        </div>
+                    `;
                     drawMarker(view, mapped.cssX, mapped.cssY);
                 })
                 .catch(() => {
@@ -768,7 +781,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // --- LÓGICA DE ZOOM (SIN ARRASTRE MANUAL) ---
+    // --- LÓGICA DE ZOOM Y PANEO ---
     function setupZoomPan(view) {
         const wrapper = document.getElementById(`card_${view}`).querySelector('.image-wrapper');
         const canvas = document.getElementById(`canvas_${view}`);
@@ -778,43 +791,84 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const updateTransform = () => {
             const zs = zoomState[view];
-            // Aplicamos el transform. Nota: panX/panY ahora solo se usan para compensar
-            // el zoom hacia el mouse, no para arrastrar la imagen manualmente.
             const transform = `translate(${zs.panX}px, ${zs.panY}px) scale(${zs.scale})`;
             
+            // Aplicamos transformación a la imagen Y al dibujo (overlay)
             canvas.style.transform = transform;
             canvas.style.transformOrigin = '0 0'; 
             overlay.style.transform = transform;
             overlay.style.transformOrigin = '0 0';
         };
 
-        // SOLO EVENTO DE RUEDA (ZOOM)
+        // ZOOM (Rueda del mouse)
         wrapper.addEventListener('wheel', (e) => {
             e.preventDefault();
             const zs = zoomState[view];
             const zoomIntensity = 0.1;
             const delta = e.deltaY < 0 ? 1 : -1;
             
-            // Limitamos el zoom entre 1x (original) y 10x
             const newScale = Math.min(Math.max(1, zs.scale + (delta * zoomIntensity)), 10);
 
-            // Cálculo para hacer zoom hacia donde apunta el mouse
+            // Matemáticas para hacer zoom hacia el puntero del mouse
             const rect = wrapper.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
 
             if (newScale === 1) {
-                // Si volvemos al tamaño original, centramos todo
                 zs.panX = 0;
                 zs.panY = 0;
             } else {
-                // Ajustamos la posición para que el zoom se sienta natural hacia el puntero
                 zs.panX = mouseX - (mouseX - zs.panX) * (newScale / zs.scale);
                 zs.panY = mouseY - (mouseY - zs.panY) * (newScale / zs.scale);
             }
             
             zs.scale = newScale;
             updateTransform();
+        });
+
+        let isDown = false;
+        let startX, startY;
+        let initialPanX, initialPanY;
+
+        wrapper.addEventListener('mousedown', (e) => {
+            // Permitimos mover siempre (excepto si quisieras bloquearlo en algún modo)
+            isDown = true;
+            zoomState[view].isDragging = false; 
+            
+            startX = e.clientX;
+            startY = e.clientY;
+            
+            initialPanX = zoomState[view].panX;
+            initialPanY = zoomState[view].panY;
+            
+            wrapper.style.cursor = 'grabbing';
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDown) return;
+            e.preventDefault();
+            
+            // Calculamos cuánto se movió el mouse
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+
+            if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+                zoomState[view].isDragging = true;
+            }
+
+            zoomState[view].panX = initialPanX + dx;
+            zoomState[view].panY = initialPanY + dy;
+            
+            updateTransform();
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDown = false;
+            wrapper.style.cursor = 'grab';
+            
+            setTimeout(() => {
+                zoomState[view].isDragging = false;
+            }, 50);
         });
 
         // Reset con doble clic
@@ -932,29 +986,106 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // --- CARGAR METADATA ---
+    async function loadMetadata() {
+        // Buscamos el cuerpo de la tabla del modal
+        const tableBody = document.getElementById('metadataTableBody');
+        if (!tableBody) return;
+
+        try {
+            const response = await fetch('/get_dicom_metadata');
+            if (!response.ok) throw new Error('Error de red');
+            
+            const data = await response.json();
+            
+            // Limpiar tabla
+            tableBody.innerHTML = '';
+            
+            // Crear filas de tabla
+            for (const [key, value] of Object.entries(data)) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="fw-bold text-secondary ps-4" style="width: 40%;">${key}</td>
+                    <td class="text-light font-monospace">${value}</td>
+                `;
+                tableBody.appendChild(row);
+            }
+        } catch (error) {
+            tableBody.innerHTML = '<tr><td colspan="2" class="text-center text-danger">Error cargando información.</td></tr>';
+            console.error(error);
+        }
+    }
+
+    // --- Lógica para iluminar botones de presets ---
+    function highlightPreset(activeId) {
+        ['presetBtnLung', 'presetBtnBone', 'presetBtnSoftTissue'].forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                btn.classList.remove('preset-active');
+                btn.classList.add('btn-outline-secondary');
+            }
+        });
+        if (activeId) {
+            const btn = document.getElementById(activeId);
+            if (btn) {
+                btn.classList.remove('btn-outline-secondary');
+                btn.classList.add('preset-active');
+            }
+        }
+    }
+
+    // --- Conectar Inputs Numéricos (+/-) con la lógica ---
+    function bindWindowLevelInput(inputId, type) {
+        const input = document.getElementById(inputId);
+        const btnMinus = document.getElementById(`${inputId}-minus`);
+        const btnPlus = document.getElementById(`${inputId}-plus`);
+        
+        if (!input) return;
+
+        const triggerUpdate = () => {
+            let val = parseInt(input.value, 10);
+            if (isNaN(val)) return;
+
+            // Leemos los sliders para tener el otro valor
+            const currentW = parseInt(document.getElementById('ww_slider').value, 10);
+            const currentL = parseInt(document.getElementById('wc_slider').value, 10);
+
+            if (type === 'ww') updateWWWC(val, currentL, 'fields');
+            else updateWWWC(currentW, val, 'fields');
+            
+            highlightPreset(null); // Apagar presets si editamos manual
+        };
+
+        input.addEventListener('change', triggerUpdate); // Al dar Enter
+        
+        if (btnMinus) {
+            btnMinus.onclick = () => {
+                input.value = parseInt(input.value || 0) - 10;
+                triggerUpdate();
+            };
+        }
+        if (btnPlus) {
+            btnPlus.onclick = () => {
+                input.value = parseInt(input.value || 0) + 10;
+                triggerUpdate();
+            };
+        }
+    }
+
     // --- INICIALIZACIÓN ---
-    // Configura los spinners personalizados con sus funciones de actualización inmediata.
-    setupCustomSpinner('minInput', 1, () => {
-        const min = parseInt(minInput.value);
-        const max = parseInt(maxInput.value);
-        updateWWWC(max - min, (max + min) / 2, 'fields');
-    });
-    setupCustomSpinner('maxInput', 1, () => {
-        const min = parseInt(minInput.value);
-        const max = parseInt(maxInput.value);
-        updateWWWC(max - min, (max + min) / 2, 'fields');
-    });
-    setupCustomSpinner('levelInput', 1, () => {
-        updateWWWC(parseInt(windowInput.value), parseInt(levelInput.value), 'fields');
-    });
-    setupCustomSpinner('windowInput', 10, () => {
-        updateWWWC(parseInt(windowInput.value), parseInt(levelInput.value), 'fields');
-    });
+    
+    // Usamos la nueva función para Ventana/Nivel
+    bindWindowLevelInput('windowInput', 'ww'); 
+    bindWindowLevelInput('levelInput', 'wc');
+    
+    // Para el histograma
     setupCustomSpinner('cutoffInput', 0.5, () => {
         contrastState.cutoff = parseFloat(cutoffInput.value) || 0;
         drawCurveAndHistogram();
     });
+
     setup3DRendererControls();
+    loadMetadata();
 
     // Inicializa los sliders de corte y carga las imágenes iniciales.
 
@@ -995,7 +1126,6 @@ function toggleFullscreen(id) {
     const element = document.getElementById(id);
     if (!element) return;
 
-    // --- PUNTO CLAVE 4: Usa una clase CSS en lugar de la API nativa ---
     if (element.classList.contains('fullscreen-active')) {
         element.classList.remove('fullscreen-active');
     } else {

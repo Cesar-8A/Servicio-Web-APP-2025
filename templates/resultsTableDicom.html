@@ -30,11 +30,12 @@
                 <p id="selectedText" class="mb-3"></p>
                 
                 <div class="d-flex justify-content-center gap-3">
-                    <button id="acceptButton" class="btn btn-udg px-4 py-2" onclick="acceptSelection()">
-                        <i class="bi bi-check-lg"></i> Cargar Paciente
+                    <button id="acceptButton" class="btn btn-udg px-4 py-2 shadow-sm" onclick="acceptSelection()">
+                        <i class="bi bi-check2-circle"></i> Cargar Paciente
                     </button>
 
-                    <a id="visualizeButton" href="{{ url_for('render', render='dicom') }}" class="btn btn-primary px-4 py-2 d-none">
+                    <a id="visualizeButton" href="{{ url_for('render', render='dicom') }}" 
+                    class="btn btn-success px-4 py-2 fw-bold d-none shadow-sm">
                         <i class="bi bi-eye-fill"></i> Ir al Visor
                     </a>
                 </div>

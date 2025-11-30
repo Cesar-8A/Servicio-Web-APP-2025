@@ -169,7 +169,7 @@ def update_3d_render(user_data, mode):
             plotter.add_mesh(surface_bone, color="white", smooth_shading=True, name="bone")
             plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, smooth_shading=True, name="skin")
         except Exception as e:
-            print(f"Error en isosuperficie: {e}")
+            print(f"Error en isosurface: {e}")
             # Fallback si falla el contorno
             plotter.add_volume(grid, cmap="bone", opacity="linear", blending="composite")
 
@@ -359,25 +359,33 @@ def load_dicom_metadata(unique_id):
 
 @app.route('/process_selected_dicom', methods=['POST'])
 def process_selected_dicom():
-    """Procesa la serie DICOM seleccionada por el usuario y prepara los datos para el visor."""
+    """
+    Procesa la serie DICOM seleccionada.
+    CORRECCIÓN: Actualiza el volumen 3D existente en lugar de borrarlo, 
+    para que el servidor no pierda la conexión.
+    """
     user_data = get_user_data()
     unique_id = request.json.get('unique_id')
     user_data["unique_id"] = unique_id
-    if not unique_id or not user_data.get('dicom_series'): return jsonify({"error": "Datos inválidos"}), 400
     
-    # Ordena los cortes y crea un volumen 3D
+    if not unique_id or not user_data.get('dicom_series'): 
+        return jsonify({"error": "Datos inválidos"}), 400
+    
+    # 1. Cargar los nuevos datos 2D
     files = user_data['dicom_series'][unique_id]["ruta_archivos"]
     slices = sorted([(int(pydicom.dcmread(f).InstanceNumber), pydicom.dcmread(f).pixel_array) for f in files])
     volume_raw = np.array([s[1] for s in slices])
     user_data['dicom_series'][unique_id]["slices"] = volume_raw
+    
     if volume_raw.size == 0: return jsonify({"error": "Serie sin slices"}), 400
     
-    # Extrae y guarda todos los parámetros necesarios para la visualización
+    # Metadatos básicos
     slope = float(user_data['dicom_series'][unique_id].get("RescaleSlope", 1.0))
     intercept = float(user_data['dicom_series'][unique_id].get("RescaleIntercept", 0.0))
     dx, dy, dz = _extract_spacing_for_series(unique_id, user_data)
     s_ax, s_co, s_sa = _compute_view_scales(dx, dy, dz)
     
+    # Actualizar sesión
     user_data.update({
         "volume_raw": volume_raw.astype(np.int16), 
         "dims": volume_raw.shape, 
@@ -385,8 +393,33 @@ def process_selected_dicom():
         "Image": (volume_raw * slope + intercept).astype(np.int16), 
         "scale_axial": s_ax, "scale_coronal": s_co, "scale_sagittal": s_sa
     })
-    user_data.pop('vtk_panel_column', None) # Limpia el panel 3D para la nueva selección
-    user_data.pop('grid_dicom', None)       # Limpia la malla 3D para que se recalcule
+
+    # --- CORRECCIÓN CLAVE: REGENERAR EL GRID 3D AQUÍ ---
+    # En lugar de borrar 'vtk_panel_column', actualizamos 'grid_full'
+    
+    series_info = user_data['dicom_series'][unique_id]
+    origin = series_info.get("ImagePositionPatient", [0,0,0])
+    spacing = (dz, dy, dx) # Z, Y, X (Ajustado a tu lógica de spacing)
+
+    # Crear nuevo grid con el NUEVO paciente
+    grid_full = pv.ImageData(dimensions=np.array(volume_raw.shape) + 1, origin=origin, spacing=spacing)
+    image_hu = user_data['Image']
+    grid_full.cell_data["values"] = image_hu.flatten(order="F")
+    grid_full = grid_full.cell_data_to_point_data()
+    
+    # Guardar el nuevo grid en la sesión
+    user_data['grid_full'] = grid_full
+    
+    # Si el visor 3D ya existía, forzamos su actualización visual AHORA MISMO
+    if 'vtk_plotter' in user_data:
+        # Limpiamos cualquier RT Struct viejo que hubiera
+        user_data.pop('RT', None)
+        user_data.pop('RT_aligned', None)
+        
+        # Redibujamos la escena con el nuevo paciente
+        current_mode = user_data.get('render_mode', 'isosurface')
+        update_3d_render(user_data, mode=current_mode)
+        
     return jsonify({"mensaje": "Ok"})
 
 @app.route('/get_histogram')
@@ -416,7 +449,36 @@ def get_histogram():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-# Reemplaza la función incorrecta con esta versión final en main.py
+
+@app.route('/get_dicom_metadata')
+def get_dicom_metadata():
+    """Devuelve los metadatos técnicos del DICOM cargado."""
+    user_data = get_user_data()
+    unique_id = user_data.get('unique_id')
+    dicom_series = user_data.get('dicom_series', {})
+    
+    if not unique_id or unique_id not in dicom_series:
+        return jsonify({"error": "No hay serie cargada"}), 400
+
+    try:
+        # Leemos solo el primer archivo para sacar los datos comunes
+        first_file_path = dicom_series[unique_id]["ruta_archivos"][0]
+        ds = pydicom.dcmread(first_file_path, stop_before_pixels=True, force=True)
+        
+        # Extraemos los tags con valores por defecto si no existen
+        metadata = {
+            "Fabricante": str(ds.get("Manufacturer", "N/A")),
+            "Modalidad": str(ds.get("Modality", "N/A")),
+            "Fecha Estudio": str(ds.get("StudyDate", "N/A")),
+            "KVp": str(ds.get("KVP", "-")),
+            "mA (Corriente)": str(ds.get("XRayTubeCurrent", "-")),
+            "Espesor Corte": f"{ds.get('SliceThickness', 0)} mm",
+            "Tamaño Matriz": f"{ds.get('Rows', 0)} x {ds.get('Columns', 0)}"
+        }
+        return jsonify(metadata)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/render/<render>")
 def render(render): 
@@ -492,7 +554,8 @@ def get_image(view, layer):
     # Dibuja la imagen con Matplotlib
     dpi = 100.0
     fig, ax = plt.subplots(figsize=(w_px / dpi, h_px / dpi), dpi=dpi)
-    ax.imshow(image_8bit, cmap="gray", vmin=0, vmax=255, interpolation="nearest", aspect='auto')
+    # Cambiamos 'nearest' (pixelado) por 'lanczos' (suavizado de alta calidad)
+    ax.imshow(image_8bit, cmap="gray", vmin=0, vmax=255, interpolation="lanczos", aspect='auto')
     ax.axis("off")
     
     # Superpone la máscara de RT Struct si existe
