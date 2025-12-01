@@ -281,10 +281,19 @@ document.addEventListener('DOMContentLoaded', function() {
     function applyLutAndDraw(view) {
         const baseImage = viewState.baseImages[view];
         const canvas = document.getElementById(`canvas_${view}`);
+        const overlay = document.getElementById(`overlay_${view}`);
         if (!baseImage || !canvas || !baseImage.complete || baseImage.naturalWidth === 0) return;
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+        // Set canvas INTERNAL dimensions to match PNG (preserves aspect ratio)
         canvas.width = baseImage.naturalWidth;
         canvas.height = baseImage.naturalHeight;
+
+        console.log(`DEBUG applyLutAndDraw [${view}]: PNG naturalWidth=${baseImage.naturalWidth}, naturalHeight=${baseImage.naturalHeight}`);
+
+        // Let CSS max-width/max-height determine actual display size
+        // Don't set explicit style.width/height - let it scale naturally
+
         ctx.drawImage(baseImage, 0, 0);
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
@@ -296,6 +305,20 @@ document.addEventListener('DOMContentLoaded', function() {
             data[i + 2] = mappedValue;
         }
         ctx.putImageData(imageData, 0, 0);
+
+        // Sync overlay canvas to match main canvas
+        if (overlay) {
+            overlay.width = canvas.width;
+            overlay.height = canvas.height;
+
+            // Position overlay to cover the main canvas
+            const canvasRect = canvas.getBoundingClientRect();
+            const wrapperRect = canvas.parentElement.getBoundingClientRect();
+            overlay.style.left = (canvasRect.left - wrapperRect.left) + 'px';
+            overlay.style.top = (canvasRect.top - wrapperRect.top) + 'px';
+            overlay.style.width = canvasRect.width + 'px';
+            overlay.style.height = canvasRect.height + 'px';
+        }
     }
     
     // --- LÓGICA DEL HISTOGRAMA ---
@@ -558,41 +581,51 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     function cssToPngPixels(canvasEl, evt) {
-        // 1. Obtenemos el rectángulo TOTAL del elemento (incluye las zonas negras)
-        const rect = canvasEl.getBoundingClientRect();
-        
-        // 2. Dimensiones internas reales de la imagen
+        // Get the canvas bounding rectangle
+        const canvasRect = canvasEl.getBoundingClientRect();
+
+        // Get click position relative to canvas
+        const cssX = evt.clientX - canvasRect.left;
+        const cssY = evt.clientY - canvasRect.top;
+
+        // Get canvas internal dimensions
         const internalW = canvasEl.width;
         const internalH = canvasEl.height;
-        
-        // 3. Calculamos el factor de escala real ("object-fit: contain")
-        const scaleX = rect.width / internalW;
-        const scaleY = rect.height / internalH;
-        const scale = Math.min(scaleX, scaleY);
-        
-        // 4. Calculamos el tamaño VISUAL de la imagen real (sin barras negras)
-        const activeW = internalW * scale;
-        const activeH = internalH * scale;
-        
-        // 5. Calculamos el tamaño de las "barras negras" (offsets)
-        const offsetX = (rect.width - activeW) / 2;
-        const offsetY = (rect.height - activeH) / 2;
 
-        // 6. Calculamos el clic relativo SOLO a la imagen visible
-        const visualClickX = (evt.clientX - rect.left) - offsetX;
-        const visualClickY = (evt.clientY - rect.top) - offsetY;
+        // Get canvas CSS display dimensions
+        const displayW = canvasRect.width;
+        const displayH = canvasRect.height;
 
-        // 7. Convertimos a píxeles internos
-        const xPix = Math.floor(visualClickX / scale);
-        const yPix = Math.floor(visualClickY / scale);
+        // Calculate the scaling factor between display and internal
+        const scaleX = internalW / displayW;
+        const scaleY = internalH / displayH;
 
-        // 8. Validamos que el clic esté realmente DENTRO de la imagen
-        if (xPix < 0 || yPix < 0 || xPix >= internalW || yPix >= internalH) return null;
+        // Convert CSS coordinates to internal pixel coordinates
+        const xPix = Math.floor(cssX * scaleX);
+        const yPix = Math.floor(cssY * scaleY);
+
+        console.log('Debug cssToPngPixels:', {
+            internalW: internalW,
+            internalH: internalH,
+            displayW: displayW,
+            displayH: displayH,
+            scaleX: scaleX,
+            scaleY: scaleY,
+            cssX: cssX,
+            cssY: cssY,
+            xPix: xPix,
+            yPix: yPix
+        });
+
+        // Validate bounds
+        if (xPix < 0 || yPix < 0 || xPix >= internalW || yPix >= internalH) {
+            return null;
+        }
 
         return {
             xPix: xPix,
             yPix: yPix,
-            cssX: xPix, 
+            cssX: xPix,
             cssY: yPix
         };
     }
@@ -601,25 +634,17 @@ document.addEventListener('DOMContentLoaded', function() {
         const overlay = document.getElementById(`overlay_${view}`);
         const mainCanvas = document.getElementById(`canvas_${view}`);
         if (!overlay || !mainCanvas) return;
-        
-        // Sincronizamos tamaño interno
-        overlay.width = mainCanvas.width;
-        overlay.height = mainCanvas.height;
-        
+
         const ctx = overlay.getContext("2d");
         ctx.clearRect(0, 0, overlay.width, overlay.height);
-        
-        // Ajuste de grosor para que se vea bien con zoom
-        const currentScale = zoomState[view] ? zoomState[view].scale : 1;
-        
-        ctx.fillStyle = "#FFD700"; 
+
+        // Marker styling
+        ctx.fillStyle = "#FFD700";
         ctx.strokeStyle = "red";
-        ctx.lineWidth = 2 / currentScale; 
+        ctx.lineWidth = 2;
 
         ctx.beginPath();
-        // Dibujamos en la coordenada interna. El CSS del navegador se encarga
-        // de estirarlo y moverlo exactamente igual que la imagen de fondo.
-        ctx.arc(cssX, cssY, 5 / currentScale, 0, 2 * Math.PI);
+        ctx.arc(cssX, cssY, 5, 0, 2 * Math.PI);
         ctx.fill();
         ctx.stroke();
     }
@@ -810,9 +835,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const newScale = Math.min(Math.max(1, zs.scale + (delta * zoomIntensity)), 10);
 
             // Matemáticas para hacer zoom hacia el puntero del mouse
-            const rect = wrapper.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
+            const canvasRect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - canvasRect.left;
+            const mouseY = e.clientY - canvasRect.top;
 
             if (newScale === 1) {
                 zs.panX = 0;
@@ -909,19 +934,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function syncViews(sourceView, x, y) {
-        // Mapeo de coordenadas DICOM (Basado en main.py logic)
-        // Axial:   X=Sagital_Slice, Y=Coronal_Slice
-        // Coronal: X=Sagital_Slice, Y=Axial_Slice
-        // Sagital: X=Coronal_Slice, Y=Axial_Slice
-        
+        // DEPRECATED: Use syncViewsFromVoxel() instead
+        // This function uses pixel coordinates which don't account for aspect ratio
+        // Keeping for backward compatibility
+
         let updates = {};
 
         if (sourceView === 'axial') {
-            updates['sagital'] = x; // El eje X del axial corresponde al corte Sagital
-            updates['coronal'] = y; // El eje Y del axial corresponde al corte Coronal
+            updates['sagital'] = x;
+            updates['coronal'] = y;
         } else if (sourceView === 'coronal') {
             updates['sagital'] = x;
-            updates['axial'] = y;   // La altura del coronal es la profundidad axial
+            updates['axial'] = y;
         } else if (sourceView === 'sagital') {
             updates['coronal'] = x;
             updates['axial'] = y;
@@ -932,14 +956,53 @@ document.addEventListener('DOMContentLoaded', function() {
             const slider = document.getElementById(`slider_${targetView}`);
             const number = document.getElementById(`number_${targetView}`);
             if (slider) {
-                // Validar límites
                 let val = Math.max(0, Math.min(updates[targetView], slider.max));
-                
-                // Solo actualizar si cambió significativamente (evitar parpadeo)
+
                 if (Math.abs(slider.value - val) > 0) {
                     slider.value = val;
                     number.value = val;
-                    // Llamamos a updateImage pero con debounce o flag para no saturar
+                    updateImage(targetView, val, true);
+                }
+            }
+        });
+    }
+
+    function syncViewsFromVoxel(sourceView, voxel) {
+        // NEW: Uses voxel coordinates from backend (accounts for aspect ratio scaling)
+        // voxel = {x, y, z} in volume space
+
+        let updates = {};
+
+        // The backend returns voxel coordinates in (z, y, x) order
+        // We need to map these to the correct slider positions for each view
+
+        if (sourceView === 'axial') {
+            // Axial view: we clicked on slice Z, pixel position (X, Y)
+            // Update sagittal to X position, coronal to Y position
+            updates['sagital'] = voxel.x;
+            updates['coronal'] = voxel.y;
+        } else if (sourceView === 'coronal') {
+            // Coronal view: we clicked on slice Y, pixel position (X, Z)
+            // Update sagittal to X position, axial to Z position
+            updates['sagital'] = voxel.x;
+            updates['axial'] = voxel.z;
+        } else if (sourceView === 'sagital') {
+            // Sagittal view: we clicked on slice X, pixel position (Y, Z)
+            // Update coronal to Y position, axial to Z position
+            updates['coronal'] = voxel.y;
+            updates['axial'] = voxel.z;
+        }
+
+        // Aplicar actualizaciones a los sliders
+        Object.keys(updates).forEach(targetView => {
+            const slider = document.getElementById(`slider_${targetView}`);
+            const number = document.getElementById(`number_${targetView}`);
+            if (slider) {
+                let val = Math.max(0, Math.min(updates[targetView], slider.max));
+
+                if (Math.abs(slider.value - val) > 0) {
+                    slider.value = val;
+                    number.value = val;
                     updateImage(targetView, val, true);
                 }
             }
@@ -949,13 +1012,27 @@ document.addEventListener('DOMContentLoaded', function() {
     function bindInspector(view) {
         const wrapper = document.getElementById(`card_${view}`).querySelector('.image-wrapper');
         const mainCanvas = document.getElementById(`canvas_${view}`);
-        
+
         if (!wrapper) return;
+
+        // Helper function to get voxel coordinates from backend (same as HU Picker)
+        function getVoxelCoordinates(view, mapped, callback) {
+            const slider = document.getElementById(`slider_${view}`);
+            const idx = parseInt(slider.value, 10);
+
+            fetch(`/hu_value?view=${view}&x=${mapped.xPix}&y=${mapped.yPix}&index=${idx}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.error && data.voxel) {
+                        callback(data.voxel);
+                    }
+                })
+                .catch(err => console.error("Inspector coordinate fetch error:", err));
+        }
 
         // Evento de Arrastre (Drag) para navegación fluida
         wrapper.addEventListener('mousemove', (e) => {
             // Solo si está activo el modo y se está presionando el clic (buttons === 1)
-            // O si prefieres que funcione solo con mover el mouse, quita "e.buttons === 1"
             if (!viewState.inspectorMode || e.buttons !== 1) return;
 
             const mapped = cssToPngPixels(mainCanvas, e);
@@ -964,24 +1041,30 @@ document.addEventListener('DOMContentLoaded', function() {
             // 1. Dibujar cruz en la vista actual
             drawCrosshair(view, mapped.cssX, mapped.cssY);
 
-            // 2. Sincronizar las otras vistas
-            syncViews(view, mapped.xPix, mapped.yPix);
+            // 2. Get correct voxel coordinates from backend, then sync
+            getVoxelCoordinates(view, mapped, (voxel) => {
+                syncViewsFromVoxel(view, voxel);
+            });
         });
-        
+
         // Evento Click simple (para posicionar sin arrastrar)
         wrapper.addEventListener('mousedown', (e) => {
             if (!viewState.inspectorMode) return;
             const mapped = cssToPngPixels(mainCanvas, e);
             if (!mapped) return;
+
             drawCrosshair(view, mapped.cssX, mapped.cssY);
-            syncViews(view, mapped.xPix, mapped.yPix);
+
+            getVoxelCoordinates(view, mapped, (voxel) => {
+                syncViewsFromVoxel(view, voxel);
+            });
         });
-        
+
         // Limpiar al soltar
         wrapper.addEventListener('mouseup', () => {
              if (viewState.inspectorMode) {
                  // Opcional: Si quieres que la cruz desaparezca al soltar, descomenta esto:
-                 // clearOverlay(view); 
+                 // clearOverlay(view);
              }
         });
     }

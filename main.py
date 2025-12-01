@@ -277,9 +277,10 @@ def _slice_2d_and_target_size(view, index, user_data):
     if vol is None or dims is None: return None, None, None
     Z, Y, X = dims
     v = "sagittal" if view.lower() == "sagital" else view.lower()
-    if v == "axial" and 0 <= index < Z: img = vol[index, :, :]; w, h = X, int(round(Y * user_data["scale_axial"]))
-    elif v == "coronal" and 0 <= index < Y: img = vol[:, index, :]; w, h = X, int(round(Z * user_data["scale_coronal"]))
-    elif v == "sagittal" and 0 <= index < X: img = vol[:, :, index]; w, h = Y, int(round(Z * user_data["scale_sagittal"]))
+    # Return actual voxel dimensions - CSS will handle aspect ratio scaling
+    if v == "axial" and 0 <= index < Z: img = vol[index, :, :]; w, h = X, Y
+    elif v == "coronal" and 0 <= index < Y: img = vol[:, index, :]; w, h = X, Z
+    elif v == "sagittal" and 0 <= index < X: img = vol[:, :, index]; w, h = Y, Z
     else: return None, None, None
     return img, max(1, int(w)), max(1, int(h))
 
@@ -536,7 +537,8 @@ def get_image(view, layer):
 
     img2d, w_px, h_px = _slice_2d_and_target_size(view, layer, user_data)
     if img2d is None: return "Vista o índice no válido", 400
-
+    
+    print(f"DEBUG get_image: view={view}, img2d.shape={img2d.shape}, w_px={w_px}, h_px={h_px}, dims={user_data.get('dims')}")
     # Aplica la conversión a Unidades Hounsfield
     slope = user_data.get("slope", 1.0); intercept = user_data.get("intercept", 0.0)
     hu2d = (img2d.astype(np.float32) * slope) + intercept
@@ -553,11 +555,32 @@ def get_image(view, layer):
 
     # Dibuja la imagen con Matplotlib
     dpi = 100.0
-    fig, ax = plt.subplots(figsize=(w_px / dpi, h_px / dpi), dpi=dpi)
-    # Cambiamos 'nearest' (pixelado) por 'lanczos' (suavizado de alta calidad)
+    # Calculate display size based on physical scaling
+    dx, dy, dz = _extract_spacing_for_series(user_data.get("unique_id"), user_data)
+
+    # Determine aspect ratio based on view
+    v_lower = view.lower()
+    if v_lower == "axial":
+        display_w, display_h = w_px, h_px  # Already square in physical space
+    elif v_lower in ["coronal", "sagital", "sagittal"]:
+        # Scale height by slice thickness ratio (dz/dx)
+        aspect_ratio = dz / dx
+        display_w = w_px
+        display_h = int(h_px * aspect_ratio)
+    else:
+        display_w, display_h = w_px, h_px
+
+    print(f"DEBUG matplotlib: dx={dx}, dy={dy}, dz={dz}, aspect_ratio={dz/dx if v_lower in ['coronal','sagital','sagittal'] else 1.0}, display_w={display_w}, display_h={display_h}")
+
+    fig, ax = plt.subplots(figsize=(display_w / dpi, display_h / dpi), dpi=dpi)
+
+    # Remove all margins and padding so axes fill the entire figure
+    fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+
+    # Use 'auto' aspect to let matplotlib stretch to fill the figure
     ax.imshow(image_8bit, cmap="gray", vmin=0, vmax=255, interpolation="lanczos", aspect='auto')
     ax.axis("off")
-    
+
     # Superpone la máscara de RT Struct si existe
     rt = user_data.get('RT_aligned')
     if rt is not None:
@@ -571,7 +594,8 @@ def get_image(view, layer):
 
     # Guarda la imagen en un buffer en memoria y la envía al navegador
     buf = BytesIO()
-    fig.savefig(buf, format='png', transparent=True, bbox_inches='tight', pad_inches=0)
+    # REMOVED bbox_inches='tight' - it was ignoring our figsize!
+    fig.savefig(buf, format='png', transparent=True, pad_inches=0)
     plt.close(fig)
     buf.seek(0)
     return send_file(buf, mimetype='image/png')
