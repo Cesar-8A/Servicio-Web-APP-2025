@@ -53,7 +53,8 @@ document.addEventListener('DOMContentLoaded', function() {
         brushSize: 1,
         paintMode: 'paint',
         segmentationTool: 'brush', // 'brush' or 'polygon'
-        scales: { axial: 1.0, coronal: 1.0, sagittal: 1.0 } // Aspect ratio scaling factors
+        scales: { axial: 1.0, coronal: 1.0, sagittal: 1.0 }, // Aspect ratio scaling factors
+        colormap: 'gray'
     };
 
     // --- POLYGON STATE ---
@@ -324,7 +325,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 viewState.baseImages[view] = img;
                 applyLutAndDraw(view);
             };
-            img.src = `/image/${view}/${currentLayer}?ww=${viewState.ww}&wc=${viewState.wc}&t=${new Date().getTime()}`;
+            const cmapParam = viewState.colormap ? `&cmap=${viewState.colormap}` : '';
+            img.src = `/image/${view}/${currentLayer}?ww=${viewState.ww}&wc=${viewState.wc}${cmapParam}&t=${new Date().getTime()}`;
         } else {
             applyLutAndDraw(view);
         }
@@ -341,20 +343,28 @@ document.addEventListener('DOMContentLoaded', function() {
         canvas.width = baseImage.naturalWidth;
         canvas.height = baseImage.naturalHeight;
 
-        // Let CSS max-width/max-height determine actual display size
-        // Don't set explicit style.width/height - let it scale naturally
-
         ctx.drawImage(baseImage, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imageData.data;
-        for (let i = 0; i < data.length; i += 4) {
-            const grayValue = data[i];
-            const mappedValue = contrastState.lut[grayValue];
-            data[i] = mappedValue;
-            data[i + 1] = mappedValue;
-            data[i + 2] = mappedValue;
+
+        // --- CAMBIO AQUÍ: VALIDAR ANTES DE PROCESAR ---
+        // Si hay color, salimos ya para no convertir a gris.
+        if (viewState.colormap && viewState.colormap !== 'gray') {
+            // Aseguramos que el overlay se ajuste antes de salir
+            if (overlay) {
+                if (overlay.width !== canvas.width || overlay.height !== canvas.height) {
+                    overlay.width = canvas.width; overlay.height = canvas.height;
+                }
+                const canvasRect = canvas.getBoundingClientRect();
+                const wrapperRect = canvas.parentElement.getBoundingClientRect();
+                overlay.style.left = (canvasRect.left - wrapperRect.left) + 'px';
+                overlay.style.top = (canvasRect.top - wrapperRect.top) + 'px';
+                overlay.style.width = canvasRect.width + 'px';
+                overlay.style.height = canvasRect.height + 'px';
+            }
+            return; 
         }
-        ctx.putImageData(imageData, 0, 0);
+        // ---------------------------------------------
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
         // Sync overlay canvas to match main canvas
         if (overlay) {
@@ -394,29 +404,85 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function drawHistogram() {
         if (!contrastState.histogramData) return;
+        
         const { width, height } = histogramCanvas;
         histCtx.clearRect(0, 0, width, height);
-        const { counts, bin_edges } = contrastState.histogramData;
-        const sortedCounts = [...counts].sort((a, b) => a - b);
-        const cutoffIndex = Math.floor(sortedCounts.length * (1 - contrastState.cutoff / 100));
-        const maxCount = sortedCounts[cutoffIndex] || 1;
-        const minHU = contrastState.minHU;
-        const maxHU = contrastState.maxHU;
-        histCtx.fillStyle = 'rgba(120, 150, 200, 0.6)';
-        for (let i = 0; i < counts.length; i++) {
+        
+        const data = contrastState.histogramData;
+        
+        // --- 1. MODO BINARIO (Para máscaras, se queda igual) ---
+        if (data.mode === 'binary') {
+            const counts = data.counts;
+            const labels = data.labels || [];
+            const maxCount = Math.max(...counts) || 1;
+            const barWidth = width / counts.length;
+            
+            counts.forEach((count, i) => {
+                const barHeight = (count / maxCount) * (height * 0.9);
+                const x = i * barWidth;
+                const y = height - barHeight;
+                
+                histCtx.fillStyle = labels[i] === '0' ? '#444444' : '#0dcaf0';
+                histCtx.fillRect(x + 5, y, barWidth - 10, barHeight);
+                
+                histCtx.fillStyle = 'white';
+                histCtx.font = '10px monospace';
+                if(labels[i]) histCtx.fillText(labels[i], x + (barWidth/2) - 5, height - 5);
+            });
+            return;
+        }
+
+        // --- 2. MODO ITK-SNAP (CORREGIDO: Ignorar Aire para escalar) ---
+        const { counts, bin_edges } = data;
+        
+        // CÁLCULO DE ESCALA INTELIGENTE:
+        // Ignoramos los primeros 5 bins (que contienen el aire/fondo -1000 HU)
+        // para calcular la altura máxima. Así el tejido no se ve aplastado.
+        let maxCount = 1;
+        if (counts.length > 20) {
+             // Cortamos el inicio (aire) y un poco del final (metal/ruido)
+             const tissueCounts = counts.slice(10, counts.length - 5); 
+             maxCount = Math.max(...tissueCounts) || 1;
+        } else {
+             maxCount = Math.max(...counts) || 1;
+        }
+
+        const binCount = counts.length;
+        const barWidth = width / binCount; 
+
+        for (let i = 0; i < binCount; i++) {
             const count = counts[i];
             if (count === 0) continue;
-            const xStart = ((bin_edges[i] - minHU) / (maxHU - minHU)) * width;
-            const xEnd = ((bin_edges[i+1] - minHU) / (maxHU - minHU)) * width;
-            const barWidth = Math.max(1, xEnd - xStart);
+            
+            // Altura (Usamos Logarítmica para suavizar picos)
             let barHeight;
             if (contrastState.logScale) {
                 barHeight = (Math.log1p(count) / Math.log1p(maxCount)) * height;
             } else {
-                barHeight = (count / maxCount) * height;
+                // Limitamos la altura al 100% del canvas para que el aire no se salga
+                const rawHeight = (count / maxCount) * height;
+                barHeight = Math.min(rawHeight, height); 
             }
+            
+            const x = i * barWidth;
+            const y = height - barHeight;
+            
+            // --- COLOREADO ESTILO ITK ---
+            const huVal = bin_edges[i];
+            let color = '#6c757d'; 
+            
+            if (huVal < -300) color = '#343a40';       // Aire: Gris oscuro
+            else if (huVal >= -150 && huVal < -30) color = '#ffc107'; // Grasa: Amarillo
+            else if (huVal >= 30 && huVal < 100) color = '#dc3545';   // Tejido: Rojo
+            else if (huVal >= 200) color = '#f8f9fa';  // Hueso: Blanco
+            
+            histCtx.fillStyle = color;
+            
+            // Dibujamos la barra con un pequeño espacio (-0.5) para definición
+            const finalWidth = barWidth > 1 ? barWidth - 0.5 : barWidth;
+            
             if (barHeight > 0) {
-                 histCtx.fillRect(xStart, height - barHeight, barWidth, barHeight);
+                 histCtx.fillRect(x, y, finalWidth, barHeight);
             }
         }
     }
@@ -749,39 +815,59 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // --- LÓGICA DE CAMBIO DE RENDERIZADO 3D  ---
+    // --- LÓGICA DE CAMBIO DE RENDERIZADO 3D Y COLOR ---
     function setup3DRendererControls() {
         const renderModeRadios = document.querySelectorAll('input[name="renderMode"]');
+        const colormapSelect = document.getElementById('colormapSelect'); // <--- Nuevo ID
         const iframe = document.getElementById('DicomRender');
-        if (!iframe || renderModeRadios.length === 0) return;
+        
+        if (!iframe) return;
 
+        // Función para enviar cambios al servidor 3D
+        const updateServer3D = () => {
+            iframe.style.opacity = '0.5'; 
+            
+            const activeRadio = document.querySelector('input[name="renderMode"]:checked');
+            const mode = activeRadio ? activeRadio.value : 'volume';
+            const cmap = viewState.colormap;
+
+            const token = document.querySelector('meta[name="csrf-token"]').content;
+            
+            fetch('/update_render_mode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+                body: JSON.stringify({ mode: mode, cmap: cmap })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if(data.status === 'success') { 
+                    // Recargar iframe solo si es necesario
+                    iframe.src = iframe.src.split('?')[0] + '?t=' + new Date().getTime(); 
+                }
+            })
+            .finally(() => { setTimeout(() => { iframe.style.opacity = '1'; }, 1000); });
+        };
+
+        // Cambio de MODO 3D (Recarga el iframe)
         renderModeRadios.forEach(radio => {
-            radio.addEventListener('change', function() {
-                // Efecto visual de carga
-                iframe.style.opacity = '0.5'; 
-                const token = document.querySelector('meta[name="csrf-token"]').content;
-                
-                fetch('/update_render_mode', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
-                    body: JSON.stringify({ mode: this.value })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if(data.status === 'success') { 
-                        // Truco para recargar el iframe forzando actualización
-                        iframe.src = iframe.src.split('?')[0] + '?t=' + new Date().getTime(); 
-                    } else { 
-                        alert('Error al cambiar el modo.'); 
-                    }
-                })
-                .catch(error => console.error("Error:", error))
-                .finally(() => {
-                     // Restaurar opacidad cuando termine (o cuando cargue el iframe)
-                     setTimeout(() => { iframe.style.opacity = '1'; }, 1000);
-                });
-            });
+            radio.addEventListener('change', updateServer3D);
         });
+
+        // Listener Dropdown Color
+        if (colormapSelect) {
+            colormapSelect.addEventListener('change', function() {
+                viewState.colormap = this.value;
+                
+                // 1. Actualizar vistas 2D (inmediato)
+                VIEWS.forEach(view => {
+                    const slider = document.getElementById(`slider_${view}`);
+                    if (slider) updateImage(view, slider.value, true);
+                });
+
+                // NO llamamos a updateServer() aquí. 
+                // El 3D se actualizará solo cuando cambies de modo (MIP/ISO) o rotes la imagen.
+            });
+        }
     }
 
     // --- LÓGICA DE ZOOM Y PANEO ---
@@ -1517,6 +1603,8 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Crear filas de tabla
             for (const [key, value] of Object.entries(data)) {
+                // Ocultamos datos técnicos que no deben verse en la tabla
+                if (key === 'Spacing' || key === 'Origin') continue;
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td class="fw-bold text-secondary ps-4" style="width: 40%;">${key}</td>
