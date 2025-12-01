@@ -651,7 +651,11 @@ def hu_value():
     else: return jsonify({"error": "Vista inválida"}), 400
     if not (0 <= z < Z and 0 <= yy < Y and 0 <= xx < X): return jsonify({"error": "Coordenadas fuera de rango"}), 400
     pv = int(vol[z, yy, xx]); hu = int(pv * user_data.get("slope", 1.0) + user_data.get("intercept", 0.0))
-    return jsonify({"voxel": {"z": z, "y": yy, "x": xx}, "hu": hu})
+    return jsonify({
+        "voxel": {"z": z, "y": yy, "x": xx},
+        "hu": hu,
+        "scales": {"axial": s_ax, "coronal": s_co, "sagittal": s_sa}
+    })
     
 @app.route('/anonimize')
 def anonimize():

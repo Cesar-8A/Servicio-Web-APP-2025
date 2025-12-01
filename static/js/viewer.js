@@ -49,7 +49,8 @@ document.addEventListener('DOMContentLoaded', function() {
         wc: 40,
         baseImages: { axial: null, sagital: null, coronal: null },
         huMode: false,
-        inspectorMode: false
+        inspectorMode: false,
+        scales: { axial: 1.0, coronal: 1.0, sagittal: 1.0 } // Aspect ratio scaling factors
     };
     const zoomState = {
         axial:   { scale: 1, panX: 0, panY: 0, isDragging: false },
@@ -308,8 +309,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Sync overlay canvas to match main canvas
         if (overlay) {
-            overlay.width = canvas.width;
-            overlay.height = canvas.height;
+            // Only resize if dimensions changed (resizing clears the canvas!)
+            if (overlay.width !== canvas.width || overlay.height !== canvas.height) {
+                overlay.width = canvas.width;
+                overlay.height = canvas.height;
+            }
 
             // Position overlay to cover the main canvas
             const canvasRect = canvas.getBoundingClientRect();
@@ -1007,6 +1011,33 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         });
+
+        // Draw crosshairs on ALL views to show the 3D intersection point
+        drawCrosshairsOnAllViews(voxel);
+    }
+
+    function drawCrosshairsOnAllViews(voxel) {
+        // Draw crosshair on each view at the corresponding 2D position
+        // voxel = {x, y, z} in volume space
+        // Need to convert voxel coords to pixel coords using aspect ratio scaling
+
+        // Axial view: crosshair at (X, Y) pixel position
+        // Axial Y needs to be scaled by scale_axial
+        const axialPixelX = voxel.x;
+        const axialPixelY = Math.round(voxel.y * viewState.scales.axial);
+        drawCrosshair('axial', axialPixelX, axialPixelY);
+
+        // Coronal view: crosshair at (X, Z) pixel position
+        // Coronal Z needs to be scaled by scale_coronal
+        const coronalPixelX = voxel.x;
+        const coronalPixelZ = Math.round(voxel.z * viewState.scales.coronal);
+        drawCrosshair('coronal', coronalPixelX, coronalPixelZ);
+
+        // Sagittal view: crosshair at (Y, Z) pixel position
+        // Sagittal Z needs to be scaled by scale_sagittal
+        const sagittalPixelY = voxel.y;
+        const sagittalPixelZ = Math.round(voxel.z * viewState.scales.sagittal);
+        drawCrosshair('sagital', sagittalPixelY, sagittalPixelZ);
     }
 
     function bindInspector(view) {
@@ -1024,6 +1055,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 .then(r => r.json())
                 .then(data => {
                     if (!data.error && data.voxel) {
+                        // Store the scaling factors for crosshair drawing
+                        if (data.scales) {
+                            viewState.scales = data.scales;
+                        }
                         callback(data.voxel);
                     }
                 })
