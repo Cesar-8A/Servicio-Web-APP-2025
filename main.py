@@ -201,17 +201,7 @@ def add_RT_to_plotter(user_data):
         # 1. Obtener datos crudos
         rt_data = user_data['RT'] 
         
-        # --- RECUPERANDO LA "MAGIA" DE TU VERSIÓN ORIGINAL ---
-        # El formato NRRD a menudo viene con ejes invertidos o rotados respecto al DICOM.
-        # Esta combinación (flip axis 0 y 2, luego transpose) era la que te funcionaba antes.
-        try:
-            # Intentamos aplicar la transformación. 
-            # Nota: Esto asume que el array es 3D.
-            rt_data = np.flip(rt_data, axis=(0, 2)).transpose(2, 0, 1)
-        except Exception as e:
-            print(f"No se pudo transformar ejes (posiblemente shape incorrecto): {e}")
-            # Si falla, usamos los datos tal cual
-            pass
+    
         # -----------------------------------------------------
 
         # 2. Crear la malla a la medida de los datos YA TRANSFORMADOS
@@ -388,12 +378,19 @@ def process_selected_dicom():
     
     # Actualizar sesión
     user_data.update({
-        "volume_raw": volume_raw.astype(np.int16), 
-        "dims": volume_raw.shape, 
+        "volume_raw": volume_raw.astype(np.int16),
+        "dims": volume_raw.shape,
         "slope": slope, "intercept": intercept,
-        "Image": (volume_raw * slope + intercept).astype(np.int16), 
+        "Image": (volume_raw * slope + intercept).astype(np.int16),
         "scale_axial": s_ax, "scale_coronal": s_co, "scale_sagittal": s_sa
     })
+
+    # Initialize segmentation mask
+    dims = volume_raw.shape
+    user_data['segmentation_mask'] = np.zeros(dims, dtype=np.uint8)
+    user_data['segmentation_active'] = False
+    user_data['brush_size'] = 1
+    user_data['paint_mode'] = 'paint'
 
     # --- CORRECCIÓN CLAVE: REGENERAR EL GRID 3D AQUÍ ---
     # En lugar de borrar 'vtk_panel_column', actualizamos 'grid_full'
@@ -585,12 +582,49 @@ def get_image(view, layer):
     rt = user_data.get('RT_aligned')
     if rt is not None:
         try:
-            v_lower = view.lower(); seg_slice = None
-            if v_lower == 'axial': seg_slice = np.flip(rt[:, :, layer], axis=0)
-            elif v_lower == 'sagital': seg_slice = rt[:, layer, :]
-            elif v_lower == 'coronal': seg_slice = np.flip(rt[layer, :, :], axis=0)
-            if seg_slice is not None: ax.imshow(ma.masked_where(seg_slice.T == 0, seg_slice.T), cmap='Reds', alpha=0.8, interpolation="nearest", aspect='auto')
-        except Exception: pass
+            v_lower = view.lower()
+            seg_slice = None
+
+            # Extract RT slice using SAME indexing as DICOM volume
+            # RT_aligned has shape (Z, Y, X) matching volume_raw
+            if v_lower == 'axial':
+                seg_slice = rt[layer, :, :]      # Shape: (Y, X) - matches DICOM
+            elif v_lower in ['sagital', 'sagittal']:
+                seg_slice = rt[:, :, layer]      # Shape: (Z, Y) - matches DICOM
+            elif v_lower == 'coronal':
+                seg_slice = rt[:, layer, :]      # Shape: (Z, X) - matches DICOM
+
+            if seg_slice is not None:
+                # Mask out zero values and overlay
+                masked_seg = ma.masked_where(seg_slice == 0, seg_slice)
+                ax.imshow(masked_seg, cmap='Reds', alpha=0.8, interpolation="nearest", aspect='auto')
+        except Exception as e:
+            print(f"RT overlay error: {e}")
+            pass
+
+    # Overlay segmentation mask if it exists
+    seg_mask = user_data.get('segmentation_mask')
+    if seg_mask is not None:
+        try:
+            v_lower = view.lower()
+            seg_slice = None
+
+            # Extract segmentation slice using SAME indexing as DICOM volume
+            # segmentation_mask has shape (Z, Y, X) matching volume_raw
+            if v_lower == 'axial':
+                seg_slice = seg_mask[layer, :, :]      # Shape: (Y, X) - matches DICOM
+            elif v_lower in ['sagital', 'sagittal']:
+                seg_slice = seg_mask[:, :, layer]      # Shape: (Z, Y) - matches DICOM
+            elif v_lower == 'coronal':
+                seg_slice = seg_mask[:, layer, :]      # Shape: (Z, X) - matches DICOM
+
+            if seg_slice is not None:
+                # Mask out zero values and overlay
+                masked_seg = ma.masked_where(seg_slice == 0, seg_slice)
+                ax.imshow(masked_seg, cmap='Greens', alpha=0.6, interpolation='nearest', aspect='auto')
+        except Exception as e:
+            print(f"Segmentation overlay error: {e}")
+            pass
 
     # Guarda la imagen en un buffer en memoria y la envía al navegador
     buf = BytesIO()
@@ -656,7 +690,241 @@ def hu_value():
         "hu": hu,
         "scales": {"axial": s_ax, "coronal": s_co, "sagittal": s_sa}
     })
-    
+
+@app.route("/paint_voxel", methods=["POST"])
+def paint_voxel():
+    """Paints or erases voxels in the segmentation mask."""
+    user_data = get_user_data()
+
+    # Extract parameters from JSON request
+    data = request.json
+    view = data.get('view', '').lower()
+    xPix = data.get('xPix', -1)
+    yPix = data.get('yPix', -1)
+    layer = data.get('layer', -1)
+    brush_size = data.get('brush_size', 1)
+    mode = data.get('mode', 'paint')
+
+    # Validate segmentation mask exists
+    seg_mask = user_data.get('segmentation_mask')
+    if seg_mask is None:
+        return jsonify({"status": "error", "message": "Segmentation mask not initialized"}), 500
+
+    # Get volume dimensions
+    dims = user_data.get('dims')
+    if dims is None:
+        return jsonify({"status": "error", "message": "Volume dimensions not found"}), 500
+
+    Z, Y, X = dims
+
+    # Get scaling factors
+    s_ax = user_data.get('scale_axial', 1.0)
+    s_co = user_data.get('scale_coronal', 1.0)
+    s_sa = user_data.get('scale_sagittal', 1.0)
+
+    # Normalize view name
+    if view == "sagital":
+        view = "sagittal"
+
+    # Convert pixel coordinates to voxel coordinates (EXACT same logic as /hu_value)
+    if view == "axial":
+        z = layer
+        yy = int(round(yPix / max(1e-8, s_ax)))
+        xx = xPix
+    elif view == "coronal":
+        z = int(round(yPix / max(1e-8, s_co)))
+        yy = layer
+        xx = xPix
+    elif view == "sagittal":
+        z = int(round(yPix / max(1e-8, s_sa)))
+        yy = xPix
+        xx = layer
+    else:
+        return jsonify({"status": "error", "message": "Invalid view"}), 400
+
+    # Validate voxel coordinates are within bounds
+    if not (0 <= z < Z and 0 <= yy < Y and 0 <= xx < X):
+        return jsonify({"status": "error", "message": "Coordinates out of range"}), 400
+
+    # Determine paint value
+    if mode == 'paint':
+        paint_value = 255
+    elif mode == 'erase':
+        paint_value = 0
+    else:
+        return jsonify({"status": "error", "message": "Invalid mode"}), 400
+
+    # Paint a 2D kernel on the current slice only
+    radius = brush_size
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            ny = yy + dy
+            nx = xx + dx
+            if 0 <= ny < Y and 0 <= nx < X:
+                seg_mask[z, ny, nx] = paint_value
+
+    return jsonify({"status": "success"})
+
+@app.route("/fill_polygon", methods=["POST"])
+def fill_polygon():
+    """Fills a polygon region in the segmentation mask."""
+    try:
+        from skimage.draw import polygon
+    except ImportError:
+        return jsonify({"status": "error", "message": "scikit-image not installed"}), 500
+
+    user_data = get_user_data()
+
+    # Extract parameters from JSON request
+    data = request.json
+    view = data.get('view', '').lower()
+    layer = data.get('layer', -1)
+    vertices = data.get('vertices', [])  # List of {xPix, yPix}
+    mode = data.get('mode', 'paint')
+
+    # Validate inputs
+    if not vertices or len(vertices) < 3:
+        return jsonify({"status": "error", "message": "At least 3 vertices required"}), 400
+
+    seg_mask = user_data.get('segmentation_mask')
+    if seg_mask is None:
+        return jsonify({"status": "error", "message": "Segmentation mask not initialized"}), 500
+
+    dims = user_data.get('dims')
+    if dims is None:
+        return jsonify({"status": "error", "message": "Volume dimensions not found"}), 500
+
+    Z, Y, X = dims
+
+    # Get scaling factors
+    s_ax = user_data.get('scale_axial', 1.0)
+    s_co = user_data.get('scale_coronal', 1.0)
+    s_sa = user_data.get('scale_sagittal', 1.0)
+
+    # Normalize view name
+    if view == "sagital":
+        view = "sagittal"
+
+    # Extract pixel coordinates from vertices
+    pixel_x = [v['xPix'] for v in vertices]
+    pixel_y = [v['yPix'] for v in vertices]
+
+    # Determine paint value
+    if mode == 'paint':
+        paint_value = 255
+    elif mode == 'erase':
+        paint_value = 0
+    else:
+        return jsonify({"status": "error", "message": "Invalid mode"}), 400
+
+    # Convert to voxel coordinates and fill based on view
+    try:
+        if view == "axial":
+            # Polygon in X-Y plane at Z = layer
+            voxel_x = pixel_x  # Direct mapping
+            voxel_y = [int(round(py / max(1e-8, s_ax))) for py in pixel_y]
+
+            # Validate layer
+            if not (0 <= layer < Z):
+                return jsonify({"status": "error", "message": "Layer out of range"}), 400
+
+            # Get polygon interior points
+            rr, cc = polygon(voxel_y, voxel_x, shape=(Y, X))
+
+            # Fill at current Z layer
+            seg_mask[layer, rr, cc] = paint_value
+
+        elif view == "coronal":
+            # Polygon in X-Z plane at Y = layer
+            voxel_x = pixel_x  # Direct mapping
+            voxel_z = [int(round(py / max(1e-8, s_co))) for py in pixel_y]
+
+            # Validate layer
+            if not (0 <= layer < Y):
+                return jsonify({"status": "error", "message": "Layer out of range"}), 400
+
+            # Get polygon interior points (rows=Z, cols=X)
+            zz, xx = polygon(voxel_z, voxel_x, shape=(Z, X))
+
+            # Fill at current Y layer
+            seg_mask[zz, layer, xx] = paint_value
+
+        elif view == "sagittal":
+            # Polygon in Y-Z plane at X = layer
+            voxel_y = pixel_x  # xPix maps to Y in sagittal
+            voxel_z = [int(round(py / max(1e-8, s_sa))) for py in pixel_y]
+
+            # Validate layer
+            if not (0 <= layer < X):
+                return jsonify({"status": "error", "message": "Layer out of range"}), 400
+
+            # Get polygon interior points (rows=Z, cols=Y)
+            zz, yy = polygon(voxel_z, voxel_y, shape=(Z, Y))
+
+            # Fill at current X layer
+            seg_mask[zz, yy, layer] = paint_value
+
+        else:
+            return jsonify({"status": "error", "message": "Invalid view"}), 400
+
+        return jsonify({"status": "success"})
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Fill failed: {str(e)}"}), 500
+
+@app.route("/clear_segmentation", methods=["POST"])
+def clear_segmentation():
+    """Clears the segmentation mask by filling it with zeros."""
+    user_data = get_user_data()
+    seg_mask = user_data.get('segmentation_mask')
+
+    if seg_mask is not None:
+        seg_mask.fill(0)
+        return jsonify({"status": "success", "message": "Segmentation cleared"})
+
+    return jsonify({"status": "error", "message": "No segmentation mask found"}), 400
+
+@app.route("/export_segmentation", methods=["POST"])
+def export_segmentation():
+    """Exports the segmentation mask as an NRRD file."""
+    user_data = get_user_data()
+    seg_mask = user_data.get('segmentation_mask')
+
+    if seg_mask is None or seg_mask.sum() == 0:
+        return jsonify({"status": "error", "message": "No segmentation to export"}), 400
+
+    try:
+        # Get spacing information
+        unique_id = user_data.get('unique_id')
+        dx, dy, dz = _extract_spacing_for_series(unique_id, user_data)
+
+        # Get origin information
+        grid_full = user_data.get('grid_full')
+        if grid_full is not None:
+            origin = grid_full.origin
+        else:
+            origin = [0, 0, 0]
+
+        # Create NRRD header
+        header = {
+            'space': 'left-posterior-superior',
+            'kinds': ['domain', 'domain', 'domain'],
+            'space directions': [[dz, 0, 0], [0, dy, 0], [0, 0, dx]],
+            'space origin': origin
+        }
+
+        # Create temporary file path
+        filepath = os.path.join(ANONIMIZADO_FOLDER, 'segmentation.nrrd')
+
+        # Write NRRD file
+        nrrd.write(filepath, seg_mask, header)
+
+        # Return file for download
+        return send_file(filepath, as_attachment=True, download_name='segmentation.nrrd')
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Export failed: {str(e)}"}), 500
+
 @app.route('/anonimize')
 def anonimize():
     """Muestra la página para anonimizar los datos DICOM."""

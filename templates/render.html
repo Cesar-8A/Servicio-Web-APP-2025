@@ -18,16 +18,10 @@
         <div class="sidebar-group">
           <div class="sidebar-group-title">General</div>
           <div class="d-flex flex-wrap justify-content-center gap-2">
-              
-              <button id="huPickerPluginBtn" class="btn btn-secondary btn-icon shadow-sm"
-                      data-bs-toggle="tooltip" data-bs-placement="right" 
-                      title="Selector HU: Medir densidad en un punto.">
-                  <i class="bi bi-bullseye"></i> 
-              </button>
 
               <button id="inspectorPluginBtn" class="btn btn-secondary btn-icon shadow-sm"
-                      data-bs-toggle="tooltip" data-bs-placement="right" 
-                      title="Inspector 3D: Sincroniza las vistas al hacer clic.">
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Inspector: Visualiza coordenadas y densidad HU.">
                   <i class="bi bi-crosshair"></i>
               </button>
 
@@ -48,15 +42,21 @@
         <div class="sidebar-group">
           <div class="sidebar-group-title">Segmentación</div>
           <div class="d-flex flex-wrap justify-content-center gap-2">
-              
-              <button id="rtStructPluginBtn" class="btn btn-secondary btn-icon shadow-sm" 
-                      data-bs-toggle="tooltip" data-bs-placement="right" 
+
+              <button id="rtStructPluginBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
                       title="Cargar Segmentación (RT Struct).">
                   <i class="bi bi-layers-half"></i>
               </button>
 
+              <button id="segmentationToolBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Crear Segmentación (Pintar Vóxeles).">
+                  <i class="bi bi-brush"></i>
+              </button>
+
               <button id="contrastEditorBtn" class="btn btn-secondary btn-icon shadow-sm"
-                      data-bs-toggle="tooltip" data-bs-placement="right" 
+                      data-bs-toggle="tooltip" data-bs-placement="right"
                       title="Editor de Histograma.">
                   <i class="bi bi-graph-up"></i>
               </button>
@@ -106,13 +106,76 @@
              </form>
           </div>
 
-          <div id="huPickerPluginContainer" style="display: none;" class="animate-fade-in">
-             <div class="tool-panel-title"><i class="bi bi-bullseye"></i> Selector HU</div>
+          <div id="inspectorPluginContainer" style="display: none;" class="animate-fade-in">
+             <div class="tool-panel-title"><i class="bi bi-crosshair"></i> Inspector</div>
              <div class="alert alert-dark border-secondary p-2">
                  <small id="huInfo" class="text-info d-block mb-1"><i class="bi bi-info-circle"></i> Haz clic en la imagen.</small>
                  <div id="huResult" class="fw-bold text-light" style="font-family: monospace;">-</div>
              </div>
-             <button id="huToggle" style="display: none;"></button>
+          </div>
+
+          <div id="segmentationToolContainer" style="display: none;" class="animate-fade-in">
+             <div class="tool-panel-title"><i class="bi bi-brush"></i> Crear Segmentación</div>
+             <div class="alert alert-dark border-secondary p-2">
+                 <small id="segToolInfo" class="text-info d-block mb-1"><i class="bi bi-info-circle"></i> Selecciona herramienta.</small>
+             </div>
+
+             <div class="bg-secondary bg-opacity-25 p-2 rounded mb-2 border border-secondary">
+                 <label class="text-light small mb-2">Herramienta:</label>
+                 <div class="btn-group w-100" role="group">
+                     <input type="radio" class="btn-check" name="segTool" id="toolBrush" value="brush" checked autocomplete="off">
+                     <label class="btn btn-outline-light btn-sm" for="toolBrush">
+                         <i class="bi bi-brush"></i> Pincel
+                     </label>
+
+                     <input type="radio" class="btn-check" name="segTool" id="toolPolygon" value="polygon" autocomplete="off">
+                     <label class="btn btn-outline-light btn-sm" for="toolPolygon">
+                         <i class="bi bi-pentagon"></i> Polígono
+                     </label>
+                 </div>
+             </div>
+
+             <div id="brushControls" class="bg-secondary bg-opacity-25 p-2 rounded mb-2 border border-secondary">
+                 <label class="text-light small mb-2">Tamaño de Pincel:</label>
+                 <div class="form-check">
+                     <input class="form-check-input" type="radio" name="brushSize" id="brush1" value="1" checked>
+                     <label class="form-check-label text-light small" for="brush1">1 vóxel</label>
+                 </div>
+                 <div class="form-check">
+                     <input class="form-check-input" type="radio" name="brushSize" id="brush3" value="3">
+                     <label class="form-check-label text-light small" for="brush3">3 vóxeles</label>
+                 </div>
+                 <div class="form-check">
+                     <input class="form-check-input" type="radio" name="brushSize" id="brush5" value="5">
+                     <label class="form-check-label text-light small" for="brush5">5 vóxeles</label>
+                 </div>
+                 <div class="form-check">
+                     <input class="form-check-input" type="radio" name="brushSize" id="brush7" value="7">
+                     <label class="form-check-label text-light small" for="brush7">7 vóxeles</label>
+                 </div>
+             </div>
+
+             <div id="polygonControls" class="bg-secondary bg-opacity-25 p-2 rounded mb-2 border border-secondary" style="display: none;">
+                 <small class="text-light d-block mb-1">• Clic para agregar vértices</small>
+                 <small class="text-light d-block mb-1">• Clic cerca del primer punto para cerrar</small>
+                 <small class="text-light d-block mb-1">• ESC para cancelar</small>
+                 <small class="text-light d-block mb-1">• ← para deshacer vértice</small>
+                 <div class="mt-2">
+                     <span class="text-light small">Vértices: <span id="vertexCount">0</span></span>
+                 </div>
+             </div>
+
+             <button id="paintModeToggleBtn" class="btn btn-sm btn-success w-100">
+                 <i class="bi bi-brush-fill"></i> Modo: Pintar
+             </button>
+
+             <button id="clearSegmentationBtn" class="btn btn-sm btn-outline-warning w-100 mt-2">
+                 <i class="bi bi-trash"></i> Borrar Todo
+             </button>
+
+             <button id="exportSegmentationBtn" class="btn btn-sm btn-primary w-100 mt-2">
+                 <i class="bi bi-download"></i> Exportar NRRD
+             </button>
           </div>
 
           <div id="windowLevelControls" style="display: none;" class="animate-fade-in">
@@ -272,7 +335,7 @@
                 {% if view != '3D' %}
                 <div class="d-flex gap-2 align-items-center px-2 mb-1">
                   <input type="range" id="slider_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-range custom-range">
-                  <input type="number" id="number_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" class="form-control form-control-sm bg-secondary text-light border-0 text-center" style="width: 60px;">
+                  <input type="number" id="number_{{ view }}" min="0" max="{{ max_val }}" value="{{ max_val // 2 }}" step="1" class="form-control form-control-sm bg-secondary text-light border-0 text-center" style="width: 60px;">
                 </div>
                 <div class="image-wrapper mt-1 bg-black rounded border border-secondary position-relative">
                   <canvas id="canvas_{{ view }}"></canvas>

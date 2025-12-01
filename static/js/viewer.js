@@ -48,9 +48,20 @@ document.addEventListener('DOMContentLoaded', function() {
         ww: 400,
         wc: 40,
         baseImages: { axial: null, sagital: null, coronal: null },
-        huMode: false,
         inspectorMode: false,
+        segmentationMode: false,
+        brushSize: 1,
+        paintMode: 'paint',
+        segmentationTool: 'brush', // 'brush' or 'polygon'
         scales: { axial: 1.0, coronal: 1.0, sagittal: 1.0 } // Aspect ratio scaling factors
+    };
+
+    // --- POLYGON STATE ---
+    const polygonState = {
+        vertices: [],           // Array of {x, y} in internal pixel coordinates
+        isDrawing: false,       // Currently drawing a polygon?
+        currentView: null,      // Which view (axial/sagital/coronal)
+        currentLayer: null      // Which slice index
     };
     const zoomState = {
         axial:   { scale: 1, panX: 0, panY: 0, isDragging: false },
@@ -96,18 +107,26 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     setupPluginButton('rtStructPluginBtn', 'rtStructPluginContainer');
-    
-    setupPluginButton('huPickerPluginBtn', 'huPickerPluginContainer', (isActive) => {
-        // Lógica específica para HU
-        const huToggle = document.getElementById('huToggle');
-        if (huToggle) huToggle.click(); // Mantener compatibilidad con tu lógica vieja
-        
-        // Si activamos HU, apagamos Inspector para evitar conflictos
+
+    setupPluginButton('segmentationToolBtn', 'segmentationToolContainer', (isActive) => {
+        viewState.segmentationMode = isActive;
+
         if (isActive) {
-            viewState.inspectorMode = false;
-            const inspectorBtn = document.getElementById('inspectorPluginBtn');
-            if (inspectorBtn) inspectorBtn.classList.remove('btn-udg-rojo');
-            VIEWS.forEach(clearOverlay);
+            // Change cursor to crosshair
+            updateCursorStyle('crosshair');
+
+            // Deactivate Inspector if active
+            if (viewState.inspectorMode) {
+                const inspectorBtn = document.getElementById('inspectorPluginBtn');
+                const inspectorContainer = document.getElementById('inspectorPluginContainer');
+                if (inspectorBtn) inspectorBtn.classList.remove('btn-udg-rojo');
+                if (inspectorContainer) inspectorContainer.style.display = 'none';
+                viewState.inspectorMode = false;
+            }
+        } else {
+            // Clear overlays and restore cursor
+            VIEWS.forEach(view => clearOverlay(view));
+            updateCursorStyle('grab');
         }
     });
 
@@ -122,19 +141,21 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Configuración del botón Inspector
-    setupPluginButton('inspectorPluginBtn', null, (isActive) => {
+    setupPluginButton('inspectorPluginBtn', 'inspectorPluginContainer', (isActive) => {
         viewState.inspectorMode = isActive;
 
         if (isActive) {
-            // --- AL ACTIVAR ---
-            viewState.huMode = false; // Apagar HU para evitar conflictos
-
-            // Apagar visualmente el botón HU si estaba prendido
-            const huBtn = document.getElementById('huPickerPluginBtn');
-            if (huBtn) huBtn.classList.remove('btn-udg-rojo');
-
             // Cambiar cursor a pointer en todas las vistas
             updateCursorStyle('pointer');
+
+            // Deactivate segmentation if active
+            if (viewState.segmentationMode) {
+                const segBtn = document.getElementById('segmentationToolBtn');
+                const segContainer = document.getElementById('segmentationToolContainer');
+                if (segBtn) segBtn.classList.remove('btn-udg-rojo');
+                if (segContainer) segContainer.style.display = 'none';
+                viewState.segmentationMode = false;
+            }
 
         } else {
             // Limpiamos los canvas de todas las vistas para borrar las líneas
@@ -142,6 +163,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Restaurar cursor a grab
             updateCursorStyle('grab');
+
+            // Limpiar el display de resultados
+            const huResult = document.getElementById('huResult');
+            if (huResult) huResult.innerHTML = '-';
         }
     });
 
@@ -258,13 +283,33 @@ document.addEventListener('DOMContentLoaded', function() {
         const slider = document.getElementById(`slider_${view}`);
         const number = document.getElementById(`number_${view}`);
         if (!slider || !number) return;
-        const update = (value) => {
-            slider.value = value;
-            number.value = value;
-            updateImage(view, value, true);
-        };
-        slider.addEventListener('input', () => update(slider.value));
-        number.addEventListener('input', () => update(number.value));
+
+        let isUpdating = false; // Flag to prevent circular updates
+
+        // Slider changes: update number input and image (uses 'input' for smooth dragging)
+        slider.addEventListener('change', () => {
+            if (isUpdating) return;
+            isUpdating = true;
+            number.value = slider.value;
+            updateImage(view, slider.value, true);
+
+            // Clear polygon if slice changes while drawing
+            if (polygonState.isDrawing && polygonState.currentView === view) {
+                clearPolygon();
+            }
+
+            setTimeout(() => { isUpdating = false; }, 0);
+        });
+
+        // Number input changes: use 'change' event instead of 'input'
+        // 'change' only fires when user is done (releases mouse/focus), not continuously
+        number.addEventListener('change', () => {
+            if (isUpdating) return;
+            isUpdating = true;
+            slider.value = number.value;
+            updateImage(view, number.value, true);
+            setTimeout(() => { isUpdating = false; }, 0);
+        });
     }
 
     // --- LÓGICA DE IMAGEN Y CANVAS ---
@@ -295,8 +340,6 @@ document.addEventListener('DOMContentLoaded', function() {
         // Set canvas INTERNAL dimensions to match PNG (preserves aspect ratio)
         canvas.width = baseImage.naturalWidth;
         canvas.height = baseImage.naturalHeight;
-
-        console.log(`DEBUG applyLutAndDraw [${view}]: PNG naturalWidth=${baseImage.naturalWidth}, naturalHeight=${baseImage.naturalHeight}`);
 
         // Let CSS max-width/max-height determine actual display size
         // Don't set explicit style.width/height - let it scale naturally
@@ -577,19 +620,6 @@ document.addEventListener('DOMContentLoaded', function() {
         drawCurveAndHistogram();
     });
 
-    // --- LÓGICA DEL SELECTOR HU ---
-    const huToggleBtn = document.getElementById('huToggle');
-    const huInfo = document.getElementById("huInfo");
-    const huResult = document.getElementById("huResult");
-
-    huToggleBtn?.addEventListener('click', () => {
-        viewState.huMode = !viewState.huMode;
-        if (huInfo) huInfo.textContent = viewState.huMode ? "Haz clic en una imagen para obtener el valor HU." : "";
-        if (!viewState.huMode) {
-            VIEWS.forEach(clearOverlay);
-        }
-    });
-
     function cssToPngPixels(canvasEl, evt) {
         // Get the canvas bounding rectangle
         const canvasRect = canvasEl.getBoundingClientRect();
@@ -640,31 +670,6 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     }
 
-    function drawMarker(view, cssX, cssY) {
-        const overlay = document.getElementById(`overlay_${view}`);
-        const mainCanvas = document.getElementById(`canvas_${view}`);
-        if (!overlay || !mainCanvas) return;
-
-        const ctx = overlay.getContext("2d");
-        ctx.clearRect(0, 0, overlay.width, overlay.height);
-
-        // cssX, cssY are already in internal pixel coordinates (from cssToPngPixels)
-        // The overlay canvas has the same transform as the main canvas,
-        // so we just draw at the pixel coordinates directly.
-        // The browser will apply the zoom/pan transform automatically.
-        const zs = zoomState[view];
-
-        // Marker styling
-        ctx.fillStyle = "#FFD700";
-        ctx.strokeStyle = "red";
-        ctx.lineWidth = 2 / zs.scale; // Scale line width so it appears constant size on screen
-
-        ctx.beginPath();
-        ctx.arc(cssX, cssY, 5 / zs.scale, 0, 2 * Math.PI); // Scale radius too
-        ctx.fill();
-        ctx.stroke();
-    }
-    
     function clearOverlay(view) {
         const overlay = document.getElementById(`overlay_${view}`);
         if (overlay) {
@@ -683,62 +688,6 @@ document.addEventListener('DOMContentLoaded', function() {
             if (wrapper) wrapper.style.cursor = cursorType;
             if (canvas) canvas.style.cursor = cursorType;
             if (overlay) overlay.style.cursor = cursorType;
-        });
-    }
-
-    function bindHU(view) {
-        const mainCanvas = document.getElementById(`canvas_${view}`);
-        const wrapper = document.getElementById(`card_${view}`).querySelector('.image-wrapper');
-        
-        if (!wrapper) return;
-        
-        wrapper.addEventListener("click", (evt) => {
-            if (zoomState[view] && zoomState[view].isDragging) {
-                return; // Fue un arrastre, no un clic de selección
-            }
-
-            // Si estábamos arrastrando (pan), no dispares el HU
-            if (!viewState.huMode || (zoomState[view] && zoomState[view].isDragging)) return;
-            
-            VIEWS.forEach(clearOverlay);
-            
-            // --- AQUÍ ESTÁ EL CAMBIO: Pasamos 'view' como tercer argumento ---
-            const mapped = cssToPngPixels(mainCanvas, evt); 
-            
-            if (!mapped) return; // Clic fuera
-
-            const slider = document.getElementById(`slider_${view}`);
-            const idx = parseInt(slider.value, 10);
-            
-            fetch(`/hu_value?view=${view}&x=${mapped.xPix}&y=${mapped.yPix}&index=${idx}`)
-                .then(r => r.json())
-                .then(data => {
-                    if (data.error) {
-                        huResult.textContent = "Error: " + data.error;
-                        return;
-                    }
-                    // --- MEJORA DE FORMATO HU ---
-                    huResult.innerHTML = `
-                        <div class="mb-1 lh-1">
-                            <span style="color: #bbbbbb; font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase;">Coordenadas:</span>
-                        </div>
-                        
-                        <div class="d-flex justify-content-between mb-2 font-monospace px-1" style="font-size: 0.9rem;">
-                            <span><span style="color: #777;">x:</span> <span style="color: #fff;">${data.voxel.x}</span></span>
-                            <span><span style="color: #777;">y:</span> <span style="color: #fff;">${data.voxel.y}</span></span>
-                            <span><span style="color: #777;">z:</span> <span style="color: #fff;">${data.voxel.z}</span></span>
-                        </div>
-
-                        <div class="d-flex justify-content-between align-items-center pt-2" style="border-top: 1px solid #444;">
-                            <span style="color: #bbbbbb; font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase;">Densidad:</span>
-                            <span style="color: #0dcaf0; font-weight: bold; font-size: 1rem;">${data.hu} HU</span>
-                        </div>
-                    `;
-                    drawMarker(view, mapped.cssX, mapped.cssY);
-                })
-                .catch(() => {
-                    huResult.textContent = "Error al obtener valor HU.";
-                });
         });
     }
 
@@ -856,8 +805,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // ZOOM (Rueda del mouse)
         wrapper.addEventListener('wheel', (e) => {
-            // Disable zoom when inspector mode is active
-            if (viewState.inspectorMode) return;
+            // Disable zoom when inspector mode or segmentation mode is active
+            if (viewState.inspectorMode || viewState.segmentationMode) return;
 
             e.preventDefault();
             const zs = zoomState[view];
@@ -888,8 +837,8 @@ document.addEventListener('DOMContentLoaded', function() {
         let initialPanX, initialPanY;
 
         wrapper.addEventListener('mousedown', (e) => {
-            // Disable panning when inspector mode is active
-            if (viewState.inspectorMode) return;
+            // Disable panning when inspector mode or segmentation mode is active
+            if (viewState.inspectorMode || viewState.segmentationMode) return;
 
             isDown = true;
             zoomState[view].isDragging = false;
@@ -925,8 +874,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         window.addEventListener('mouseup', () => {
             isDown = false;
-            // Only restore grab cursor if not in inspector mode
-            if (!viewState.inspectorMode) {
+            // Only restore grab cursor if not in inspector mode or segmentation mode
+            if (!viewState.inspectorMode && !viewState.segmentationMode) {
                 wrapper.style.cursor = 'grab';
                 canvas.style.cursor = 'grab';
                 overlay.style.cursor = 'grab';
@@ -1089,10 +1038,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (!wrapper) return;
 
-        // Helper function to get voxel coordinates from backend (same as HU Picker)
+        // Helper function to get voxel coordinates from backend and update HU display
         function getVoxelCoordinates(view, mapped, callback) {
             const slider = document.getElementById(`slider_${view}`);
             const idx = parseInt(slider.value, 10);
+            const huResult = document.getElementById('huResult');
 
             fetch(`/hu_value?view=${view}&x=${mapped.xPix}&y=${mapped.yPix}&index=${idx}`)
                 .then(r => r.json())
@@ -1102,10 +1052,36 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (data.scales) {
                             viewState.scales = data.scales;
                         }
+
+                        // Update HU display panel with formatted output
+                        if (huResult) {
+                            huResult.innerHTML = `
+                                <div class="mb-1 lh-1">
+                                    <span style="color: #bbbbbb; font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase;">Coordenadas:</span>
+                                </div>
+
+                                <div class="d-flex justify-content-between mb-2 font-monospace px-1" style="font-size: 0.9rem;">
+                                    <span><span style="color: #777;">x:</span> <span style="color: #fff;">${data.voxel.x}</span></span>
+                                    <span><span style="color: #777;">y:</span> <span style="color: #fff;">${data.voxel.y}</span></span>
+                                    <span><span style="color: #777;">z:</span> <span style="color: #fff;">${data.voxel.z}</span></span>
+                                </div>
+
+                                <div class="d-flex justify-content-between align-items-center pt-2" style="border-top: 1px solid #444;">
+                                    <span style="color: #bbbbbb; font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase;">Densidad:</span>
+                                    <span style="color: #0dcaf0; font-weight: bold; font-size: 1rem;">${data.hu} HU</span>
+                                </div>
+                            `;
+                        }
+
                         callback(data.voxel);
+                    } else if (data.error && huResult) {
+                        huResult.textContent = "Error: " + data.error;
                     }
                 })
-                .catch(err => console.error("Inspector coordinate fetch error:", err));
+                .catch(err => {
+                    console.error("Inspector coordinate fetch error:", err);
+                    if (huResult) huResult.textContent = "Error al obtener valor HU.";
+                });
         }
 
         // Evento de Arrastre (Drag) para navegación fluida
@@ -1146,6 +1122,383 @@ document.addEventListener('DOMContentLoaded', function() {
              }
         });
     }
+
+    // --- SEGMENTATION CLICK HANDLER ---
+    function handleSegmentationClick(view, evt) {
+        if (!viewState.segmentationMode) return;
+
+        const canvas = document.getElementById('canvas_' + view);
+        if (!canvas) return;
+
+        // Convert screen coordinates to pixel coordinates
+        const coords = cssToPngPixels(canvas, evt);
+
+        // Get current layer
+        const slider = document.getElementById('slider_' + view);
+        const layer = parseInt(slider.value);
+
+        // Handle based on tool mode
+        if (viewState.segmentationTool === 'brush') {
+            // BRUSH MODE: Paint voxel immediately
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+            const payload = {
+                view: view,
+                xPix: coords.xPix,
+                yPix: coords.yPix,
+                layer: layer,
+                brush_size: viewState.brushSize,
+                mode: viewState.paintMode
+            };
+
+            fetch('/paint_voxel', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    updateImage(view, layer, true);
+                }
+            })
+            .catch(error => {
+                console.error('Paint error:', error);
+            });
+
+        } else if (viewState.segmentationTool === 'polygon') {
+            // POLYGON MODE: Add vertex or close polygon
+
+            // Check if starting new polygon on different view/layer
+            if (polygonState.isDrawing &&
+                (polygonState.currentView !== view || polygonState.currentLayer !== layer)) {
+                alert('Termina el polígono actual antes de cambiar de vista o capa.');
+                return;
+            }
+
+            // Check if clicking near first vertex to close
+            if (isNearFirstVertex(coords.xPix, coords.yPix, view)) {
+                closeAndFillPolygon(view);
+                return;
+            }
+
+            // Add vertex
+            polygonState.vertices.push({ x: coords.xPix, y: coords.yPix });
+            polygonState.isDrawing = true;
+            polygonState.currentView = view;
+            polygonState.currentLayer = layer;
+
+            // Update vertex count display
+            const vertexCount = document.getElementById('vertexCount');
+            if (vertexCount) vertexCount.textContent = polygonState.vertices.length;
+
+            // Redraw polygon
+            drawPolygon(view);
+        }
+    }
+
+    // Attach click listeners to all canvas elements
+    VIEWS.forEach(view => {
+        const canvas = document.getElementById('canvas_' + view);
+        if (canvas) {
+            canvas.addEventListener('click', (evt) => {
+                handleSegmentationClick(view, evt);
+            });
+        }
+    });
+
+    // --- POLYGON MOUSEMOVE HANDLER (Preview Line) ---
+    VIEWS.forEach(view => {
+        const canvas = document.getElementById('canvas_' + view);
+        if (canvas) {
+            canvas.addEventListener('mousemove', (evt) => {
+                if (!viewState.segmentationMode || viewState.segmentationTool !== 'polygon') return;
+                if (!polygonState.isDrawing || polygonState.currentView !== view) return;
+
+                const coords = cssToPngPixels(canvas, evt);
+                drawPolygon(view, coords.xPix, coords.yPix);
+            });
+        }
+    });
+
+    // --- KEYBOARD HANDLERS FOR POLYGON ---
+    document.addEventListener('keydown', (evt) => {
+        if (!viewState.segmentationMode || viewState.segmentationTool !== 'polygon') return;
+        if (!polygonState.isDrawing) return;
+
+        // ESC: Cancel polygon
+        if (evt.key === 'Escape') {
+            clearPolygon();
+            evt.preventDefault();
+        }
+
+        // Backspace: Remove last vertex
+        if (evt.key === 'Backspace') {
+            if (polygonState.vertices.length > 0) {
+                polygonState.vertices.pop();
+
+                // Update vertex count
+                const vertexCount = document.getElementById('vertexCount');
+                if (vertexCount) vertexCount.textContent = polygonState.vertices.length;
+
+                // Redraw
+                if (polygonState.vertices.length === 0) {
+                    clearPolygon();
+                } else {
+                    drawPolygon(polygonState.currentView);
+                }
+            }
+            evt.preventDefault();
+        }
+
+        // Enter: Close polygon
+        if (evt.key === 'Enter') {
+            closeAndFillPolygon(polygonState.currentView);
+            evt.preventDefault();
+        }
+    });
+
+    // --- SEGMENTATION UI CONTROLS ---
+
+    // Brush size radio buttons
+    const brushRadios = document.querySelectorAll('input[name="brushSize"]');
+    brushRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            viewState.brushSize = parseInt(this.value);
+        });
+    });
+
+    // Paint/Erase toggle button
+    const paintToggleBtn = document.getElementById('paintModeToggleBtn');
+    if (paintToggleBtn) {
+        paintToggleBtn.addEventListener('click', () => {
+            if (viewState.paintMode === 'paint') {
+                viewState.paintMode = 'erase';
+                paintToggleBtn.className = 'btn btn-sm btn-danger w-100';
+                paintToggleBtn.innerHTML = '<i class="bi bi-eraser-fill"></i> Modo: Borrar';
+            } else {
+                viewState.paintMode = 'paint';
+                paintToggleBtn.className = 'btn btn-sm btn-success w-100';
+                paintToggleBtn.innerHTML = '<i class="bi bi-brush-fill"></i> Modo: Pintar';
+            }
+        });
+    }
+
+    // Clear segmentation button
+    const clearSegBtn = document.getElementById('clearSegmentationBtn');
+    if (clearSegBtn) {
+        clearSegBtn.addEventListener('click', () => {
+            if (!confirm('¿Borrar toda la segmentación?')) return;
+
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+            fetch('/clear_segmentation', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Reload all views
+                    VIEWS.forEach(view => {
+                        const slider = document.getElementById('slider_' + view);
+                        const layer = parseInt(slider.value);
+                        updateImage(view, layer);
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Clear error:', error);
+            });
+        });
+    }
+
+    // Export segmentation button
+    const exportSegBtn = document.getElementById('exportSegmentationBtn');
+    if (exportSegBtn) {
+        exportSegBtn.addEventListener('click', () => {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+            fetch('/export_segmentation', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => response.blob())
+            .then(blob => {
+                // Create download link
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'segmentation.nrrd';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            })
+            .catch(error => {
+                alert('Error al exportar: ' + error);
+                console.error('Export error:', error);
+            });
+        });
+    }
+
+    // --- POLYGON DRAWING FUNCTIONS ---
+
+    function clearPolygon() {
+        polygonState.vertices = [];
+        polygonState.isDrawing = false;
+        polygonState.currentView = null;
+        polygonState.currentLayer = null;
+
+        // Clear overlays on all views
+        VIEWS.forEach(view => clearOverlay(view));
+
+        // Update vertex count display
+        const vertexCount = document.getElementById('vertexCount');
+        if (vertexCount) vertexCount.textContent = '0';
+    }
+
+    function drawPolygon(view, previewX = null, previewY = null) {
+        const overlay = document.getElementById(`overlay_${view}`);
+        if (!overlay) return;
+
+        const ctx = overlay.getContext('2d');
+        const zs = zoomState[view];
+
+        // Clear overlay
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+        if (polygonState.vertices.length === 0) return;
+
+        // Style
+        ctx.strokeStyle = '#00FFFF'; // Cyan
+        ctx.fillStyle = '#00FFFF';
+        ctx.lineWidth = 2 / zs.scale;
+
+        // Draw vertices
+        polygonState.vertices.forEach((vertex, index) => {
+            ctx.beginPath();
+            ctx.arc(vertex.x, vertex.y, 4 / zs.scale, 0, 2 * Math.PI);
+            ctx.fill();
+
+            // Draw connecting lines
+            if (index > 0) {
+                ctx.beginPath();
+                ctx.moveTo(polygonState.vertices[index - 1].x, polygonState.vertices[index - 1].y);
+                ctx.lineTo(vertex.x, vertex.y);
+                ctx.stroke();
+            }
+        });
+
+        // Draw preview line (from last vertex to mouse position)
+        if (previewX !== null && previewY !== null && polygonState.vertices.length > 0) {
+            const lastVertex = polygonState.vertices[polygonState.vertices.length - 1];
+            ctx.strokeStyle = '#00FFFF';
+            ctx.setLineDash([5 / zs.scale, 3 / zs.scale]);
+            ctx.beginPath();
+            ctx.moveTo(lastVertex.x, lastVertex.y);
+            ctx.lineTo(previewX, previewY);
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset dash
+        }
+    }
+
+    function isNearFirstVertex(x, y, view) {
+        if (polygonState.vertices.length < 3) return false;
+
+        const firstVertex = polygonState.vertices[0];
+        const threshold = 10 / zoomState[view].scale; // 10 pixels in internal space
+
+        const dx = x - firstVertex.x;
+        const dy = y - firstVertex.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        return distance <= threshold;
+    }
+
+    function closeAndFillPolygon(view) {
+        if (polygonState.vertices.length < 3) {
+            alert('Se necesitan al menos 3 vértices para crear un polígono.');
+            clearPolygon();
+            return;
+        }
+
+        // Get current layer
+        const slider = document.getElementById('slider_' + view);
+        const layer = parseInt(slider.value);
+
+        // Get CSRF token
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+        // Prepare payload
+        const payload = {
+            view: view,
+            layer: layer,
+            vertices: polygonState.vertices.map(v => ({ xPix: v.x, yPix: v.y })),
+            mode: viewState.paintMode
+        };
+
+        // Send to backend
+        fetch('/fill_polygon', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify(payload)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                // Reload image to show filled polygon
+                updateImage(view, layer, true);
+
+                // Clear polygon state
+                clearPolygon();
+            } else {
+                alert('Error: ' + (data.message || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Polygon fill error:', error);
+            alert('Error al rellenar polígono: ' + error);
+        });
+    }
+
+    // --- TOOL SWITCHING (Brush vs Polygon) ---
+    const toolRadios = document.querySelectorAll('input[name="segTool"]');
+    const brushControls = document.getElementById('brushControls');
+    const polygonControls = document.getElementById('polygonControls');
+    const segToolInfo = document.getElementById('segToolInfo');
+
+    toolRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            viewState.segmentationTool = this.value;
+
+            if (this.value === 'brush') {
+                brushControls.style.display = 'block';
+                polygonControls.style.display = 'none';
+                segToolInfo.innerHTML = '<i class="bi bi-info-circle"></i> Haz clic para pintar.';
+
+                // Clear any polygon in progress
+                clearPolygon();
+            } else if (this.value === 'polygon') {
+                brushControls.style.display = 'none';
+                polygonControls.style.display = 'block';
+                segToolInfo.innerHTML = '<i class="bi bi-info-circle"></i> Clic para agregar vértices.';
+
+                // Clear overlays
+                VIEWS.forEach(v => clearOverlay(v));
+            }
+        });
+    });
 
     // --- CARGAR METADATA ---
     async function loadMetadata() {
@@ -1255,7 +1608,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (slider) {
             setupSliceSlider(view);
             setupZoomPan(view);
-            bindHU(view);
             bindInspector(view);
             updateImage(view, slider.value, true);
 
