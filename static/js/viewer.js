@@ -124,18 +124,24 @@ document.addEventListener('DOMContentLoaded', function() {
     // Configuración del botón Inspector
     setupPluginButton('inspectorPluginBtn', null, (isActive) => {
         viewState.inspectorMode = isActive;
-        
+
         if (isActive) {
             // --- AL ACTIVAR ---
             viewState.huMode = false; // Apagar HU para evitar conflictos
-            
+
             // Apagar visualmente el botón HU si estaba prendido
             const huBtn = document.getElementById('huPickerPluginBtn');
             if (huBtn) huBtn.classList.remove('btn-udg-rojo');
-            
+
+            // Cambiar cursor a pointer en todas las vistas
+            updateCursorStyle('pointer');
+
         } else {
             // Limpiamos los canvas de todas las vistas para borrar las líneas
             VIEWS.forEach(view => clearOverlay(view));
+
+            // Restaurar cursor a grab
+            updateCursorStyle('grab');
         }
     });
 
@@ -642,13 +648,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const ctx = overlay.getContext("2d");
         ctx.clearRect(0, 0, overlay.width, overlay.height);
 
+        // cssX, cssY are already in internal pixel coordinates (from cssToPngPixels)
+        // The overlay canvas has the same transform as the main canvas,
+        // so we just draw at the pixel coordinates directly.
+        // The browser will apply the zoom/pan transform automatically.
+        const zs = zoomState[view];
+
         // Marker styling
         ctx.fillStyle = "#FFD700";
         ctx.strokeStyle = "red";
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2 / zs.scale; // Scale line width so it appears constant size on screen
 
         ctx.beginPath();
-        ctx.arc(cssX, cssY, 5, 0, 2 * Math.PI);
+        ctx.arc(cssX, cssY, 5 / zs.scale, 0, 2 * Math.PI); // Scale radius too
         ctx.fill();
         ctx.stroke();
     }
@@ -659,6 +671,19 @@ document.addEventListener('DOMContentLoaded', function() {
              const ctx = overlay.getContext("2d");
              ctx.clearRect(0, 0, overlay.width, overlay.height);
         }
+    }
+
+    function updateCursorStyle(cursorType) {
+        // Update cursor style for all view wrappers, canvases, and overlays
+        VIEWS.forEach(view => {
+            const wrapper = document.getElementById(`card_${view}`).querySelector('.image-wrapper');
+            const canvas = document.getElementById(`canvas_${view}`);
+            const overlay = document.getElementById(`overlay_${view}`);
+
+            if (wrapper) wrapper.style.cursor = cursorType;
+            if (canvas) canvas.style.cursor = cursorType;
+            if (overlay) overlay.style.cursor = cursorType;
+        });
     }
 
     function bindHU(view) {
@@ -831,11 +856,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // ZOOM (Rueda del mouse)
         wrapper.addEventListener('wheel', (e) => {
+            // Disable zoom when inspector mode is active
+            if (viewState.inspectorMode) return;
+
             e.preventDefault();
             const zs = zoomState[view];
             const zoomIntensity = 0.1;
             const delta = e.deltaY < 0 ? 1 : -1;
-            
+
             const newScale = Math.min(Math.max(1, zs.scale + (delta * zoomIntensity)), 10);
 
             // Matemáticas para hacer zoom hacia el puntero del mouse
@@ -850,7 +878,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 zs.panX = mouseX - (mouseX - zs.panX) * (newScale / zs.scale);
                 zs.panY = mouseY - (mouseY - zs.panY) * (newScale / zs.scale);
             }
-            
+
             zs.scale = newScale;
             updateTransform();
         });
@@ -860,17 +888,21 @@ document.addEventListener('DOMContentLoaded', function() {
         let initialPanX, initialPanY;
 
         wrapper.addEventListener('mousedown', (e) => {
-            // Permitimos mover siempre (excepto si quisieras bloquearlo en algún modo)
+            // Disable panning when inspector mode is active
+            if (viewState.inspectorMode) return;
+
             isDown = true;
-            zoomState[view].isDragging = false; 
-            
+            zoomState[view].isDragging = false;
+
             startX = e.clientX;
             startY = e.clientY;
-            
+
             initialPanX = zoomState[view].panX;
             initialPanY = zoomState[view].panY;
-            
+
             wrapper.style.cursor = 'grabbing';
+            canvas.style.cursor = 'grabbing';
+            overlay.style.cursor = 'grabbing';
         });
 
         window.addEventListener('mousemove', (e) => {
@@ -893,8 +925,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         window.addEventListener('mouseup', () => {
             isDown = false;
-            wrapper.style.cursor = 'grab';
-            
+            // Only restore grab cursor if not in inspector mode
+            if (!viewState.inspectorMode) {
+                wrapper.style.cursor = 'grab';
+                canvas.style.cursor = 'grab';
+                overlay.style.cursor = 'grab';
+            }
+
             setTimeout(() => {
                 zoomState[view].isDragging = false;
             }, 50);
@@ -919,18 +956,24 @@ document.addEventListener('DOMContentLoaded', function() {
         const ctx = overlay.getContext("2d");
         ctx.clearRect(0, 0, overlay.width, overlay.height);
 
-        // Dibujar Cruz (Azul cian muy visible)
-        ctx.strokeStyle = "#00FFFF"; 
-        ctx.lineWidth = 1;
-        ctx.setLineDash([5, 3]); // Línea punteada
+        // x, y are already in internal pixel coordinates (from cssToPngPixels)
+        // The overlay canvas has the same transform as the main canvas,
+        // so we just draw at the pixel coordinates directly.
+        // The browser will apply the zoom/pan transform automatically.
+        const zs = zoomState[view];
 
-        // Línea Vertical
+        // Dibujar Cruz (Azul cian muy visible)
+        ctx.strokeStyle = "#00FFFF";
+        ctx.lineWidth = 1 / zs.scale; // Scale line width so it appears constant size on screen
+        ctx.setLineDash([5 / zs.scale, 3 / zs.scale]); // Scale dash pattern too
+
+        // Línea Vertical - draw at pixel coordinate x
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, overlay.height);
         ctx.stroke();
 
-        // Línea Horizontal
+        // Línea Horizontal - draw at pixel coordinate y
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(overlay.width, y);
@@ -1211,10 +1254,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const slider = document.getElementById(`slider_${view}`);
         if (slider) {
             setupSliceSlider(view);
-            setupZoomPan(view); 
+            setupZoomPan(view);
             bindHU(view);
             bindInspector(view);
             updateImage(view, slider.value, true);
+
+            // Set initial cursor to grab (for pan/zoom mode)
+            const wrapper = document.getElementById(`card_${view}`).querySelector('.image-wrapper');
+            const canvas = document.getElementById(`canvas_${view}`);
+            const overlay = document.getElementById(`overlay_${view}`);
+
+            if (wrapper) wrapper.style.cursor = 'grab';
+            if (canvas) canvas.style.cursor = 'grab';
+            if (overlay) overlay.style.cursor = 'grab';
         }
     });
     
