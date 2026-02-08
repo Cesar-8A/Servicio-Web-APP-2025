@@ -54,7 +54,8 @@ document.addEventListener('DOMContentLoaded', function() {
         paintMode: 'paint',
         segmentationTool: 'brush', // 'brush' or 'polygon'
         scales: { axial: 1.0, coronal: 1.0, sagittal: 1.0 }, // Aspect ratio scaling factors
-        colormap: 'gray'
+        colormap: 'gray',
+        lastVoxel: { x: null, y: null, z: null }
     };
 
     // --- POLYGON STATE ---
@@ -339,49 +340,40 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!baseImage || !canvas || !baseImage.complete || baseImage.naturalWidth === 0) return;
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-        // Set canvas INTERNAL dimensions to match PNG (preserves aspect ratio)
+        // 1. Dimensiones internas reales
         canvas.width = baseImage.naturalWidth;
         canvas.height = baseImage.naturalHeight;
 
+        // 2. Centrado Inicial
+        const zs = zoomState[view];
+        const wrapper = canvas.parentElement;
+        if (zs.scale === 1 && zs.panX === 0 && zs.panY === 0) {
+            zs.panX = (wrapper.clientWidth - canvas.width) / 2;
+            zs.panY = (wrapper.clientHeight - canvas.height) / 2;
+        }
+
+        // 3. Dibujar imagen
         ctx.drawImage(baseImage, 0, 0);
 
-        // --- CAMBIO AQUÍ: VALIDAR ANTES DE PROCESAR ---
-        // Si hay color, salimos ya para no convertir a gris.
-        if (viewState.colormap && viewState.colormap !== 'gray') {
-            // Aseguramos que el overlay se ajuste antes de salir
-            if (overlay) {
-                if (overlay.width !== canvas.width || overlay.height !== canvas.height) {
-                    overlay.width = canvas.width; overlay.height = canvas.height;
-                }
-                const canvasRect = canvas.getBoundingClientRect();
-                const wrapperRect = canvas.parentElement.getBoundingClientRect();
-                overlay.style.left = (canvasRect.left - wrapperRect.left) + 'px';
-                overlay.style.top = (canvasRect.top - wrapperRect.top) + 'px';
-                overlay.style.width = canvasRect.width + 'px';
-                overlay.style.height = canvasRect.height + 'px';
-            }
-            return; 
-        }
-        // ---------------------------------------------
-
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-        // Sync overlay canvas to match main canvas
+        // 4. Sincronizar Overlay (Solo si el tamaño cambió para no borrar contenido innecesariamente)
         if (overlay) {
-            // Only resize if dimensions changed (resizing clears the canvas!)
             if (overlay.width !== canvas.width || overlay.height !== canvas.height) {
                 overlay.width = canvas.width;
                 overlay.height = canvas.height;
             }
-
-            // Position overlay to cover the main canvas
-            const canvasRect = canvas.getBoundingClientRect();
-            const wrapperRect = canvas.parentElement.getBoundingClientRect();
-            overlay.style.left = (canvasRect.left - wrapperRect.left) + 'px';
-            overlay.style.top = (canvasRect.top - wrapperRect.top) + 'px';
-            overlay.style.width = canvasRect.width + 'px';
-            overlay.style.height = canvasRect.height + 'px';
+            
+            // 5. Transformación Unificada
+            const transform = `translate(${zs.panX}px, ${zs.panY}px) scale(${zs.scale})`;
+            canvas.style.transform = transform;
+            overlay.style.transform = transform;
         }
+
+        // 6. REDIBUJAR CRUZ: Si hay un punto seleccionado, lo pintamos tras la actualización
+        if (viewState.lastVoxel.x !== null) {
+            drawCrosshairFromVoxel(view);
+        }
+
+        updateMinimap(view);
     }
     
     // --- LÓGICA DEL HISTOGRAMA ---
@@ -686,52 +678,31 @@ document.addEventListener('DOMContentLoaded', function() {
         drawCurveAndHistogram();
     });
 
+
     function cssToPngPixels(canvasEl, evt) {
-        // Get the canvas bounding rectangle
-        const canvasRect = canvasEl.getBoundingClientRect();
+        const wrapper = canvasEl.parentElement;
+        const wrapRect = wrapper.getBoundingClientRect();
+        const view = canvasEl.id.split('_')[1]; 
+        const zs = zoomState[view];
 
-        // Get click position relative to canvas
-        const cssX = evt.clientX - canvasRect.left;
-        const cssY = evt.clientY - canvasRect.top;
+        // 1. Posición del mouse relativa al contenedor estático (el cuadro negro)
+        const mouseX = evt.clientX - wrapRect.left;
+        const mouseY = evt.clientY - wrapRect.top;
 
-        // Get canvas internal dimensions
-        const internalW = canvasEl.width;
-        const internalH = canvasEl.height;
+        // 2. FÓRMULA MAESTRA: Píxel = (Posición Mouse - Paneo) / Escala
+        // Esto "deshace" el zoom y el paneo para hallar la coordenada real
+        const xPix = (mouseX - zs.panX) / zs.scale;
+        const yPix = (mouseY - zs.panY) / zs.scale;
 
-        // Get canvas CSS display dimensions
-        const displayW = canvasRect.width;
-        const displayH = canvasRect.height;
-
-        // Calculate the scaling factor between display and internal
-        const scaleX = internalW / displayW;
-        const scaleY = internalH / displayH;
-
-        // Convert CSS coordinates to internal pixel coordinates
-        const xPix = Math.floor(cssX * scaleX);
-        const yPix = Math.floor(cssY * scaleY);
-
-        console.log('Debug cssToPngPixels:', {
-            internalW: internalW,
-            internalH: internalH,
-            displayW: displayW,
-            displayH: displayH,
-            scaleX: scaleX,
-            scaleY: scaleY,
-            cssX: cssX,
-            cssY: cssY,
-            xPix: xPix,
-            yPix: yPix
-        });
-
-        // Validate bounds
-        if (xPix < 0 || yPix < 0 || xPix >= internalW || yPix >= internalH) {
+        // 3. Validar límites para no dar clics en el vacío negro
+        if (xPix < 0 || yPix < 0 || xPix >= canvasEl.width || yPix >= canvasEl.height) {
             return null;
         }
 
         return {
-            xPix: xPix,
-            yPix: yPix,
-            cssX: xPix,
+            xPix: Math.floor(xPix),
+            yPix: Math.floor(yPix),
+            cssX: xPix, 
             cssY: yPix
         };
     }
@@ -887,6 +858,8 @@ document.addEventListener('DOMContentLoaded', function() {
             canvas.style.transformOrigin = '0 0'; 
             overlay.style.transform = transform;
             overlay.style.transformOrigin = '0 0';
+            // --- NUEVO: Actualizar el mini-mapa al mover o hacer zoom ---
+            updateMinimap(view);
         };
 
         // ZOOM (Rueda del mouse)
@@ -977,6 +950,53 @@ document.addEventListener('DOMContentLoaded', function() {
             zoomState[view] = { scale: 1, panX: 0, panY: 0, isDragging: false };
             updateTransform();
         });
+
+
+        // Dentro de setupZoomPan(view)...
+        const minimapContainer = document.getElementById(`minimap_container_${view}`);
+        minimapContainer.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            
+            const miniCanvas = document.getElementById(`minimap_canvas_${view}`);
+            const mainCanvas = document.getElementById(`canvas_${view}`);
+            const rect = miniCanvas.getBoundingClientRect();
+            const zs = zoomState[view];
+            const wrapper = mainCanvas.parentElement;
+            
+            // 1. Obtener porcentaje del clic dentro del Mini-mapa (0 a 1)
+            const pctX = (e.clientX - rect.left) / rect.width;
+            const pctY = (e.clientY - rect.top) / rect.height;
+            
+            // 2. Centrar la vista: movemos el paneo para que el punto clicado esté en el centro del cuadrante
+            // pan = (Centro del Visor) - (Punto en Imagen * Zoom)
+            zs.panX = (wrapper.clientWidth / 2) - (pctX * mainCanvas.width * zs.scale);
+            zs.panY = (wrapper.clientHeight / 2) - (pctY * mainCanvas.height * zs.scale);
+
+            updateTransform();
+        });
+
+        // Función para sincronizar la "cámara" en las 3 vistas
+        function syncTransforms(sourceView) {
+            const sourceState = zoomState[sourceView];
+            VIEWS.forEach(targetView => {
+                if (targetView !== sourceView && targetView !== '3D') {
+                    const targetState = zoomState[targetView];
+                    targetState.scale = sourceState.scale;
+                    targetState.panX = sourceState.panX;
+                    targetState.panY = sourceState.panY;
+                    
+                    // Forzar actualización visual del canvas y su minimapa
+                    const canvas = document.getElementById(`canvas_${targetView}`);
+                    const overlay = document.getElementById(`overlay_${targetView}`);
+                    const transform = `translate(${targetState.panX}px, ${targetState.panY}px) scale(${targetState.scale})`;
+                    
+                    if (canvas) canvas.style.transform = transform;
+                    if (overlay) overlay.style.transform = transform;
+                    
+                    updateMinimap(targetView);
+                }
+            });
+        }
     }
 
     // --- LÓGICA DEL INSPECTOR 3D (CROSSHAIR) ---
@@ -1728,6 +1748,71 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
         curveResizeObserver.observe(curveEditorWrapper);
+    }
+
+    function updateMinimap(view) {
+        const container = document.getElementById(`minimap_container_${view}`);
+        const miniCanvas = document.getElementById(`minimap_canvas_${view}`);
+        const viewport = document.getElementById(`minimap_viewport_${view}`);
+        const mainCanvas = document.getElementById(`canvas_${view}`);
+        const zs = zoomState[view];
+
+        if (!mainCanvas || !miniCanvas || !viewport) return;
+
+        // Solo mostrar si el zoom es significativo
+        container.style.display = (zs.scale > 1.1) ? 'block' : 'none';
+        if (zs.scale <= 1.1) return;
+
+        const ctx = miniCanvas.getContext('2d');
+        const wrapper = mainCanvas.parentElement;
+
+        // 1. Ajustar miniatura (Mantenemos 120px de ancho para mejor visibilidad)
+        const miniWidth = 120;
+        miniCanvas.width = miniWidth;
+        miniCanvas.height = miniWidth * (mainCanvas.height / mainCanvas.width);
+
+        // Sincronizar el contenedor con el canvas para evitar desfases de margen
+        container.style.width = miniCanvas.width + 'px';
+        container.style.height = miniCanvas.height + 'px';
+
+        // 2. Dibujar miniatura (hereda brillo/contraste)
+        ctx.clearRect(0, 0, miniCanvas.width, miniCanvas.height);
+        ctx.drawImage(mainCanvas, 0, 0, miniCanvas.width, miniCanvas.height);
+
+        // 3. LÓGICA DE SINCRONIZACIÓN 100% (Basada en la "Ventana" de visión)
+        // Calculamos cuánto de la imagen cabe en el wrapper (cuadrante negro)
+        const totalScaledWidth = mainCanvas.width * zs.scale;
+        const totalScaledHeight = mainCanvas.height * zs.scale;
+
+        // Proporción del tamaño del visor respecto a la imagen con zoom
+        const widthRatio = wrapper.clientWidth / totalScaledWidth;
+        const heightRatio = wrapper.clientHeight / totalScaledHeight;
+
+        // Posición del visor relativa al origen de la imagen (0 a 1)
+        // Restamos el paneo y dividimos por el tamaño total escalado
+        const leftOffset = (-zs.panX) / totalScaledWidth;
+        const topOffset = (-zs.panY) / totalScaledHeight;
+
+        // 4. Aplicar dimensiones al recuadro amarillo
+        // Limitamos a 100% para que el recuadro no se salga de la miniatura
+        viewport.style.width = Math.min(100, widthRatio * 100) + '%';
+        viewport.style.height = Math.min(100, heightRatio * 100) + '%';
+        viewport.style.left = Math.max(0, leftOffset * 100) + '%';
+        viewport.style.top = Math.max(0, topOffset * 100) + '%';
+    }
+
+    function drawCrosshairFromVoxel(view) {
+        const v = viewState.lastVoxel;
+        const s = viewState.scales;
+        if (v.x === null) return;
+
+        let px, py;
+        // Mapeo según la vista para posicionar la cruz correctamente en los 3 planos
+        if (view === 'axial') { px = v.x; py = v.y * s.axial; }
+        else if (view === 'coronal') { px = v.x; py = v.z * s.coronal; }
+        else if (view === 'sagital') { px = v.y; py = v.z * s.sagittal; }
+
+        drawCrosshair(view, px, py);
     }
 });
 

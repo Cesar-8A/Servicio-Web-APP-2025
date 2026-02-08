@@ -656,7 +656,7 @@ def hu_value():
     Z, Y, X = dims
     if view == "sagital": view = "sagittal" # Compatibilidad
     s_ax, s_co, s_sa = user_data["scale_axial"], user_data["scale_coronal"], user_data["scale_sagittal"]
-    if view == "axial": z, yy, xx = index, int(round(y / max(1e-8, s_ax))), x
+    if view == "axial": z, yy, xx = index, int(round(y / max(1e-8, s_ax))), int(round(x))
     elif view == "coronal": z, yy, xx = int(round(y / max(1e-8, s_co))), index, x
     elif view == "sagittal": z, yy, xx = int(round(y / max(1e-8, s_sa))), x, index
     else: return jsonify({"error": "Vista inválida"}), 400

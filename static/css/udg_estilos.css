@@ -356,17 +356,31 @@ input[type="file"]:focus::file-selector-button {
 .quadrant-card .card-body { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; padding: 0 !important; }
 
 /* Contenedores de imagen */
-.image-wrapper, .iframe-wrapper {
-    flex-grow: 1; position: relative; min-height: 0; width: 100%;
-    background-color: black; overflow: hidden; display: flex; justify-content: center; align-items: center;
+
+.image-wrapper {
+    flex-grow: 1;
+    position: relative;
+    width: 100%;
+    height: 100%;
+    background-color: black;
+    overflow: hidden;
+    /* CAMBIO: Eliminamos Flexbox para control total por JavaScript */
+    display: block !important; 
+    padding: 0 !important;
+    margin: 0 !important;
 }
-.image-wrapper canvas, .iframe-wrapper iframe {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    object-fit: contain; pointer-events: auto; cursor: grab;
-    image-rendering: auto; image-rendering: -webkit-optimize-contrast;
+
+.image-wrapper canvas {
+    position: absolute; /* Origen 0,0 real respecto al contenedor negro */
+    top: 0;
+    left: 0;
+    /* CAMBIO: El tamaño lo controla el JS, aquí solo quitamos estiramientos */
+    width: auto !important;
+    height: auto !important;
+    object-fit: none !important;
+    image-rendering: pixelated; 
+    cursor: grab;
 }
-.image-wrapper canvas:active { cursor: grabbing; }
-#overlay_axial, #overlay_sagital, #overlay_coronal { pointer-events: none; }
 
 .fullscreen-active {
     position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
@@ -374,6 +388,27 @@ input[type="file"]:focus::file-selector-button {
     display: flex; flex-direction: column;
 }
 .fullscreen-active .card-body { height: 100%; padding: 0; }
+
+/* Estilos para el Mini-mapa */
+.minimap-container {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    /* Eliminamos el min-height fijo, el JS se encarga */
+    border: 1px solid #555;
+    background-color: rgba(0, 0, 0, 0.85);
+    z-index: 500;
+    overflow: hidden;
+    box-shadow: 0 0 10px rgba(0,0,0,0.7);
+}
+
+.minimap-viewport {
+    position: absolute;
+    border: 1.5px solid var(--amarillo-UDG);
+    background-color: rgba(255, 215, 0, 0.1); /* Tinte suave para ver el área */
+    box-sizing: border-box;
+    pointer-events: none;
+}
 
 
 /* ==========================================================================
