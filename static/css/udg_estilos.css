@@ -1,28 +1,31 @@
 /* ==========================================================================
-   1. VARIABLES Y CONFIGURACI├ôN BASE
+   UDG ESTILOS MAESTRO - VERSIÓN FINAL FORMAL
+   ========================================================================== */
+
+/* ==========================================================================
+   1. VARIABLES Y CONFIGURACIÓN BASE
    ========================================================================== */
 :root {
-/* ==========================================================================
-UDG ESTILOS
-========================================================================== */
-    /* --- PALETA M├ëDICA --- */
-    --color-primario: #0d6efd; /* Azul est├índar */
+    /* --- PALETA MÉDICA (Interfaz de Trabajo - Sobriedad) --- */
+    --color-primario: #0d6efd; /* Azul estándar */
     --color-activo:   #0a58ca; /* Azul oscuro hover */
     --color-acento:   #6ea8fe; /* Azul claro texto */
     
-    /* --- PALETA UDG --- */
+    /* --- PALETA UDG (Identidad Institucional - Branding) --- */
     --rojo-UDG:       #AE1C28; /* Acciones principales */
     --amarillo-UDG:   #FFD700; /* Logos, cargas y focos */
 
-    /* --- Modo Oscuro Profundo --- */
-    --gris-fondo:     #121212; /* Fondo de p├ígina */
+    /* --- NEUTROS (Modo Oscuro Profundo) --- */
+    --gris-fondo:     #121212; /* Fondo de página */
     --gris-panel:     #1e1e1e; /* Fondo de tarjetas y barras */
-    --gris-borde:     #333333; /* L├¡neas divisorias */
+    --gris-borde:     #333333; /* Líneas divisorias */
     --gris-fuerte:    #2c2c2c; /* Inputs y fondos secundarios */
     --gris-medio:     #6c757d; /* Textos secundarios */
     --gris-debil:     #adb5bd; /* Textos terciarios */
     --gris-texto:     #e0e0e0; /* Texto principal */
     --gris-claro:     #ffffff;
+
+    /* Mapeo de compatibilidad */
     --gris-oscuro:    var(--gris-panel);
 }
 
@@ -69,7 +72,7 @@ h1, h2, h3, h4, h5 { color: var(--gris-claro); font-weight: bold; }
 
 
 /* ==========================================================================
-   3. BARRA DE NAVEGACI├ôN
+   3. BARRA DE NAVEGACIÓN
    ========================================================================== */
 .navbar {
     background-color: var(--gris-panel);
@@ -127,11 +130,11 @@ h1, h2, h3, h4, h5 { color: var(--gris-claro); font-weight: bold; }
     background-color: #89171e; color: var(--amarillo-UDG); box-shadow: 0 0 10px rgba(174, 28, 40, 0.4);
 }
 
-/* Bot├│n Dorado UDG */
+/* Botón Dorado UDG */
 .btn-udg-dorado { background-color: var(--amarillo-UDG); color: black; }
 .btn-udg-dorado:hover { background-color: #e0c300; }
 
-/* --- Botones M├⌐dicos/Secundarios (Estilo Ghost Azulado - RECUPERADO) --- */
+/* --- Botones Médicos/Secundarios (Estilo Ghost Azulado - RECUPERADO) --- */
 .btn-secondary, .btn-outline-secondary, .btn-outline-light {
     background-color: rgba(13, 110, 253, 0.15); /* Fondo azul sutil transparente */
     border: 1px solid rgba(13, 110, 253, 0.3);  /* Borde azul sutil */
@@ -139,13 +142,13 @@ h1, h2, h3, h4, h5 { color: var(--gris-claro); font-weight: bold; }
     backdrop-filter: blur(5px);
 }
 .btn-secondary:hover, .btn-outline-secondary:hover, .btn-outline-light:hover {
-    background-color: rgba(13, 110, 253, 0.3); /* Azul m├ís intenso al hover */
+    background-color: rgba(13, 110, 253, 0.3); /* Azul más intenso al hover */
     border-color: var(--color-primario);
     color: white;
     transform: translateY(-1px);
 }
 
-/* --- Botones Formales de Acci├│n (Inferiores en Anonimizar) --- */
+/* --- Botones Formales de Acción (Inferiores en Anonimizar) --- */
 .btn-formal {
     border-radius: 6px; padding: 0.6rem 1.5rem; font-weight: 600;
     display: inline-flex; align-items: center; gap: 8px;
@@ -160,11 +163,11 @@ h1, h2, h3, h4, h5 { color: var(--gris-claro); font-weight: bold; }
 /* Exportar (Verde - RECUPERADO) */
 .btn-formal-green { background-color: #198754; border: 1px solid #198754; color: white; }
 .btn-formal-green:hover { background-color: #146c43; box-shadow: 0 4px 12px rgba(25, 135, 84, 0.3); }
-/* Acci├│n Peligrosa (Rojo) */
+/* Acción Peligrosa (Rojo) */
 .btn-formal-red { background-color: rgba(220, 53, 69, 0.1); border: 1px solid #dc3545; color: #dc3545; }
 .btn-formal-red:hover { background-color: #dc3545; color: white !important; }
 
-/* --- Bot├│n Excluir Sutil (En tabla de Anonimizar) --- */
+/* --- Botón Excluir Sutil (En tabla de Anonimizar) --- */
 .btn-subtle-danger {
     border: 1px solid var(--gris-borde); color: var(--gris-debil); background: transparent; transition: all 0.2s ease;
 }
@@ -214,7 +217,7 @@ h1, h2, h3, h4, h5 { color: var(--gris-claro); font-weight: bold; }
     background-color: #89171e; color: var(--amarillo-UDG);
 }
 
-/* --- INPUT FILE EST├üNDAR (Limpio) --- */
+/* --- INPUT FILE ESTÁNDAR (Limpio) --- */
 input[type="file"].form-control {
     background-color: var(--gris-panel) !important; padding: 0.5rem; height: auto;
     color: transparent !important; 
@@ -234,7 +237,7 @@ input[type="file"]:focus::file-selector-button {
     outline: 2px solid var(--color-primario); outline-offset: 2px;
 }
 
-/* Correcci├│n espec├¡fica para sidebar */
+/* Corrección específica para sidebar */
 #plugins-sidebar input[type="file"].form-control { padding: 0.25rem; border: 1px solid var(--gris-medio); }
 #plugins-sidebar input[type="file"]::file-selector-button {
     background-color: var(--color-primario) !important; padding: 0.1rem 0.5rem; font-size: 0.8rem; margin-right: 0.5rem; border: none;
@@ -276,10 +279,10 @@ input[type="file"]:focus::file-selector-button {
 /* Fila Activa (Gris destacado con acento rojo sutil) */
 .table-active-row td {
     background-color: #2a2a2a !important; color: white !important; font-weight: 600;
-    border-left-color: var(--rojo-UDG) !important; /* L├¡nea roja elegante */
+    border-left-color: var(--rojo-UDG) !important; /* Línea roja elegante */
 }
 
-/* --- Tabla Anonimizaci├│n (Oscura Formal) --- */
+/* --- Tabla Anonimización (Oscura Formal) --- */
 #tabla-container {
     background-color: var(--gris-panel); border-radius: 12px; padding: 2rem; border: 1px solid var(--gris-borde); box-shadow: 0 4px 20px rgba(0,0,0,0.3);
 }
@@ -288,7 +291,7 @@ input[type="file"]:focus::file-selector-button {
     background-color: #000000 !important; color: white !important;
     padding: 1rem; text-transform: uppercase; font-size: 0.8rem; border-bottom: 1px solid #333;
 }
-/* Encabezados de Secci├│n (Ej. PATIENTNAME) */
+/* Encabezados de Sección (Ej. PATIENTNAME) */
 #tabla-container tr.section-header td {
     background-color: #1a1a1a !important; color: var(--color-acento) !important;
     font-weight: 700; font-family: 'Consolas', monospace; text-align: center;
@@ -360,13 +363,27 @@ input[type="file"]:focus::file-selector-button {
     flex-grow: 1; position: relative; min-height: 0; width: 100%;
     background-color: black; overflow: hidden; display: flex; justify-content: center; align-items: center;
 }
-.image-wrapper canvas, .iframe-wrapper iframe {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    object-fit: contain; pointer-events: auto; cursor: grab;
+.image-wrapper canvas {
+    position: relative;
+    max-width: 100%;
+    max-height: 100%;
+    pointer-events: auto;
     image-rendering: auto; image-rendering: -webkit-optimize-contrast;
 }
-.image-wrapper canvas:active { cursor: grabbing; }
-#overlay_axial, #overlay_sagital, #overlay_coronal { pointer-events: none; }
+/* Cursor is now managed by JavaScript based on active tool */
+
+.iframe-wrapper iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+#overlay_axial, #overlay_sagital, #overlay_coronal {
+    position: absolute;
+    pointer-events: none;
+}
 
 .fullscreen-active {
     position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
@@ -396,20 +413,20 @@ input[type="file"]:focus::file-selector-button {
     background-color: var(--gris-borde); color: var(--gris-debil);
     border: 1px solid transparent;
 }
-/* Hover Azul M├⌐dico */
+/* Hover Azul Médico */
 .btn-icon:hover {
     border-color: var(--color-acento) !important; color: white !important;
     background-color: rgba(13, 110, 253, 0.2) !important;
     box-shadow: 0 0 10px rgba(13, 110, 253, 0.3); transform: translateY(-1px);
 }
-/* Activo Azul M├⌐dico (Sin amarillo) */
+/* Activo Azul Médico (Sin amarillo) */
 .btn-icon.btn-udg-rojo, .btn-icon.btn-udg-rojo:hover, .btn-icon.btn-udg-rojo:focus {
     background-color: var(--color-primario) !important;
     color: white !important; border-color: var(--color-acento) !important;
     box-shadow: 0 0 12px rgba(13, 110, 253, 0.6) !important; transform: scale(1.05);
 }
 
-/* Correcci├│n de textos y T├¡tulos */
+/* Corrección de textos y Títulos */
 #plugins-sidebar .text-muted, #plugins-sidebar .form-label, #plugins-sidebar small { color: #b0b0b0 !important; }
 
 .tool-panel-title {
@@ -421,7 +438,7 @@ input[type="file"]:focus::file-selector-button {
 
 
 /* ==========================================================================
-   9. WIDGETS ESPEC├ìFICOS
+   9. WIDGETS ESPECÍFICOS
    ========================================================================== */
 #huPickerPluginContainer .alert {
     background-color: rgba(255, 255, 255, 0.02) !important;
@@ -434,14 +451,14 @@ input[type="file"]:focus::file-selector-button {
     background-color: #050505 !important; /* Negro profundo */
     color: #ffffff !important;            /* Texto blanco puro */
     
-    /* Borde t├⌐cnico: Gris oscuro con acento Azul a la izquierda */
+    /* Borde técnico: Gris oscuro con acento Azul a la izquierda */
     border: 1px solid #333;
     border-left: 3px solid var(--color-primario); 
     
     border-radius: 6px;
     padding: 12px;
     
-    /* Tipograf├¡a de consola/c├│digo para n├║meros */
+    /* Tipografía de consola/código para números */
     font-family: 'Consolas', 'Courier New', monospace;
     font-size: 0.85rem;
     
@@ -472,10 +489,10 @@ input[type="file"]:focus::file-selector-button {
 
 #huResult .text-info {
     color: #0dcaf0 !important; /* Cyan brillante para el valor HU */
-    text-shadow: 0 0 5px rgba(13, 202, 240, 0.4); /* Peque├▒o resplandor */
+    text-shadow: 0 0 5px rgba(13, 202, 240, 0.4); /* Pequeño resplandor */
 }
 
-/* L├¡neas divisorias internas */
+/* Líneas divisorias internas */
 #huResult .border-top {
     border-color: #333 !important;
 }
@@ -490,7 +507,7 @@ input[type="file"]:focus::file-selector-button {
     color: white !important; font-weight: bold; box-shadow: inset 0 3px 5px rgba(0,0,0,0.2);
 }
 
-/* Spinners Num├⌐ricos */
+/* Spinners Numéricos */
 .custom-spinner input[type='number']::-webkit-inner-spin-button, .custom-spinner input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .custom-spinner input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
 .custom-spinner input {
@@ -512,7 +529,7 @@ input[type="file"]:focus::file-selector-button {
 #contrastEditorContainer .btn-outline-secondary { border-color: #6c757d; color: #e0e0e0; }
 #contrastEditorContainer .btn-outline-secondary:hover { background-color: #6c757d; color: white; }
 
-/* Acorde├│n Metadata */
+/* Acordeón Metadata */
 .accordion-button::after { filter: invert(1); transform: scale(0.7); }
 .accordion-button:not(.collapsed) { background-color: var(--gris-borde) !important; color: var(--amarillo-UDG) !important; box-shadow: none; }
 #collapseMeta .accordion-body { padding: 5px !important; overflow: hidden !important; }
@@ -530,7 +547,7 @@ input[type="file"]:focus::file-selector-button {
    AJUSTES RESPONSIVOS
    ========================================= */
 @media (max-width: 992px) {
-    /* Hacemos la tarjeta un poco m├ís compacta */
+    /* Hacemos la tarjeta un poco más compacta */
     .card {
         padding: 1.5rem !important;
     }
@@ -540,12 +557,12 @@ input[type="file"]:focus::file-selector-button {
         font-size: 2.5rem !important;
     }
     
-    /* Ajustamos el tama├▒o del t├¡tulo */
+    /* Ajustamos el tamaño del título */
     h3 {
         font-size: 1.5rem;
     }
     
-    /* Aseguramos que el bot├│n de subir no se rompa */
+    /* Aseguramos que el botón de subir no se rompa */
     .input-group-integrated .btn-upload {
         padding: 0.6rem 1rem;
         font-size: 0.9rem;

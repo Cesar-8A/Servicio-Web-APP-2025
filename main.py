@@ -145,45 +145,43 @@ def create_or_get_plotter(user_data):
     return panel_column
 
 def update_3d_render(user_data, mode):
-    """
-    Actualiza el 3D. (Lógica Ivan + Mejoras Visuales Luis)
-    """
+    """Actualiza el renderizado 3D usando el volumen completo guardado."""
     plotter = user_data.get('vtk_plotter')
     panel_vtk = user_data.get('vtk_panel')
+    
+    # Recuperamos el grid completo que creamos arriba
     grid = user_data.get('grid_full') 
     
-    if not plotter or not panel_vtk or grid is None: return
+    if not plotter or not panel_vtk or grid is None:
+        print("Error: No se encontró el volumen 3D (grid_full) para renderizar.")
+        return
 
-    # Recuperamos el colormap actual (o 'bone' por defecto)
-    current_cmap = user_data.get('current_cmap', 'bone')
-
+    # Limpiar la escena anterior
     plotter.clear()
 
+    # Dibujar según el modo
     if mode == 'isosurface':
         try:
+            # Umbrales aproximados: Hueso > 175, Piel entre -200 y 0
             surface_bone = grid.contour([175]) 
             surface_skin = grid.contour([-200]) 
+            
             plotter.add_mesh(surface_bone, color="white", smooth_shading=True, name="bone")
             plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, smooth_shading=True, name="skin")
-        except:
-            plotter.add_volume(grid, cmap=current_cmap, opacity="linear", blending="composite")
+        except Exception as e:
+            print(f"Error en isosurface: {e}")
+            # Fallback si falla el contorno
+            plotter.add_volume(grid, cmap="bone", opacity="linear", blending="composite")
 
     elif mode == 'mip':
-        plotter.add_volume(grid, cmap=current_cmap, opacity="linear", blending="maximum")
+        # Maximum Intensity Projection (Esqueleto brillante)
+        plotter.add_volume(grid, cmap="bone", opacity="linear", blending="maximum")
 
-    elif mode == 'mip_inverted':
-        # Forzamos el mapa de color invertido si no lo está ya
-        cmap_inv = f"{current_cmap}_r" if not current_cmap.endswith('_r') else current_cmap
-        plotter.add_volume(grid, cmap=cmap_inv, opacity="linear", blending="maximum")
-    # ------------------------------------
+    else: # 'Volume Rendering'
+        # Renderizado volumétrico estándar (Transparente)
+        plotter.add_volume(grid, cmap="bone", opacity="linear", blending="composite")
 
-    else: # Volume
-        plotter.add_volume(grid, cmap=current_cmap, opacity="linear", blending="composite")
-
-    # Re-dibujar RT Struct si existe (Lógica de Ivan intacta)
-    if 'RT' in user_data and 'RT_aligned' in user_data:
-        add_RT_to_plotter(user_data)
-
+    # Ajustar cámara y actualizar
     plotter.view_isometric()
     panel_vtk.param.trigger('object')
 
@@ -424,92 +422,61 @@ def process_selected_dicom():
 
 @app.route('/get_histogram')
 def get_histogram():
-    """
-    Histograma Estilo ITK-SNAP:
-    - Rango fijo: -1024 a 1000.
-    - Resolución: 300 bins (rectángulos).
-    """
+    """Calcula y devuelve los datos del histograma para la imagen cargada."""
     user_data = get_user_data()
-    image = user_data.get('Image')
-    if image is None: return jsonify({"error": "No hay imagen"}), 404
+    image = user_data.get('Image') # Usamos la imagen en HU
+    if image is None:
+        return jsonify({"error": "No hay imagen cargada"}), 404
+
     try:
+        # Usamos la imagen completa para el histograma
         pixel_data = image.flatten()
         
-        # 1. Configuración Estricta solicitada
-        min_hu, max_hu = -1024, 1000
-        num_bins = 300 # Cantidad de rectángulos
+        # Limita el rango para enfocarse en valores clínicamente relevantes y mejorar el rendimiento
+        # Puedes ajustar estos valores si trabajas con rangos de HU muy específicos
+        min_hu, max_hu = -1024, 3071
+        pixel_data = pixel_data[(pixel_data >= min_hu) & (pixel_data <= max_hu)]
 
-        # 2. Filtrar datos dentro del rango solicitado
-        # Los valores fuera de este rango se ignoran para el gráfico (como en ITK-SNAP)
-        valid_pixels = pixel_data[(pixel_data >= min_hu) & (pixel_data <= max_hu)]
+        # Calcula el histograma con NumPy
+        counts, bin_edges = np.histogram(pixel_data, bins=256, range=[min_hu, max_hu])
 
-        # 3. Calcular histograma con 300 bins exactos
-        counts, bin_edges = np.histogram(valid_pixels, bins=num_bins, range=[min_hu, max_hu])
-        
-        # Segmentos anatómicos (Se mantienen igual para la info extra)
-        segments = {
-            "Aire": int(np.sum(valid_pixels < -300)),
-            "Grasa": int(np.sum((valid_pixels >= -120) & (valid_pixels < -30))),
-            "Tejido": int(np.sum((valid_pixels >= 30) & (valid_pixels < 60))),
-            "Hueso": int(np.sum(valid_pixels > 300))
-        }
-
+        # Devuelve los datos listos para ser usados en el frontend
         return jsonify({
-            "mode": "tissue", # Usamos tissue para activar el modo de dibujo normal
             "counts": counts.tolist(),
-            "bin_edges": bin_edges.tolist(),
-            "segments": segments,
-            "range": [min_hu, max_hu] # Enviamos el rango explícito
+            "bin_edges": bin_edges.tolist()
         })
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/get_dicom_metadata')
 def get_dicom_metadata():
-    """
-    Devuelve metadatos técnicos COMPLETOS para la ficha técnica.
-    """
+    """Devuelve los metadatos técnicos del DICOM cargado."""
     user_data = get_user_data()
-    uid = user_data.get('unique_id')
-    if not uid: return jsonify({"error": "No data"}), 400
+    unique_id = user_data.get('unique_id')
+    dicom_series = user_data.get('dicom_series', {})
+    
+    if not unique_id or unique_id not in dicom_series:
+        return jsonify({"error": "No hay serie cargada"}), 400
+
     try:
-        files = user_data['dicom_series'][uid]["ruta_archivos"]
-        ds = pydicom.dcmread(files[0], stop_before_pixels=True)
+        # Leemos solo el primer archivo para sacar los datos comunes
+        first_file_path = dicom_series[unique_id]["ruta_archivos"][0]
+        ds = pydicom.dcmread(first_file_path, stop_before_pixels=True, force=True)
         
-        # Recuperar geometría (Necesaria para Inspector, pero oculta en tabla)
-        grid = user_data.get('grid_full')
-        if grid:
-            spacing = list(grid.spacing) 
-            origin = list(grid.origin)
-        else:
-            spacing = [1.0, 1.0, 1.0]
-            origin = [0.0, 0.0, 0.0]
-        
-        # --- DICCIONARIO COMPLETO (En Español) ---
+        # Extraemos los tags con valores por defecto si no existen
         metadata = {
-            "Paciente": str(ds.get("PatientName", "Anónimo")), 
-            "ID Paciente": str(ds.get("PatientID", "-")),
-            "Modalidad": str(ds.get("Modality", "N/A")), 
+            "Fabricante": str(ds.get("Manufacturer", "N/A")),
+            "Modalidad": str(ds.get("Modality", "N/A")),
             "Fecha Estudio": str(ds.get("StudyDate", "N/A")),
-            "Institución": str(ds.get("InstitutionName", "-")),
-            "Fabricante": str(ds.get("Manufacturer", "-")),
-            "Modelo": str(ds.get("ManufacturerModelName", "-")),
-            "KVp (Voltaje)": str(ds.get("KVP", "-")),
+            "KVp": str(ds.get("KVP", "-")),
             "mA (Corriente)": str(ds.get("XRayTubeCurrent", "-")),
-            "Tiempo Exp.": str(ds.get("ExposureTime", "-")),
             "Espesor Corte": f"{ds.get('SliceThickness', 0)} mm",
-            "Ubicación": f"{ds.get('SliceLocation', '-')}",
-            "Matriz": f"{ds.get('Rows', 0)} x {ds.get('Columns', 0)}",
-            
-            # Datos técnicos internos (El JS los filtra para no mostrarlos en la tabla)
-            "Spacing": spacing, 
-            "Origin": origin
+            "Tamaño Matriz": f"{ds.get('Rows', 0)} x {ds.get('Columns', 0)}"
         }
         return jsonify(metadata)
+        
     except Exception as e:
-        print(f"Error metadata: {e}") 
-        return jsonify({"error": "Error"}), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/render/<render>")
 def render(render): 
@@ -539,73 +506,129 @@ def render(render):
 
 @app.route('/update_render_mode', methods=['POST'])
 def update_render_mode():
+    """
+    Recibe una solicitud para cambiar el modo de renderizado 3D y lo aplica.
+    """
     user_data = get_user_data()
-    data = request.json
+    new_mode = request.json.get('mode')
     
-    # Guardamos los nuevos valores
-    new_mode = data.get('mode')
-    new_cmap = data.get('cmap') 
-    
-    user_data['render_mode'] = new_mode
-    if new_cmap: user_data['current_cmap'] = new_cmap 
+    if not new_mode or 'vtk_plotter' not in user_data:
+        return jsonify({"status": "error", "message": "Datos inválidos o plotter no inicializado."}), 400
 
-    if 'vtk_plotter' in user_data:
-        update_3d_render(user_data, mode=new_mode)
+    # Llama a la función de actualización
+    update_3d_render(user_data, mode=new_mode)
     
-    return jsonify({"status": "success"})
+    # Guarda la elección del usuario para la próxima vez que cargue la página
+    user_data['render_mode'] = new_mode
+    
+    return jsonify({"status": "success", "message": f"Renderizado cambiado a {new_mode}"})
 
 
 @app.route('/image/<view>/<int:layer>')
 def get_image(view, layer):
+    """Genera y devuelve una imagen PNG de un corte 2D específico."""
     user_data = get_user_data()
-    ww = request.args.get('ww', 400, type=float)
-    wc = request.args.get('wc', 40, type=float)
-    cmap = request.args.get('cmap', 'gray') # NUEVO PARÁMETRO
+    # Recibe los parámetros de Window Leveling (brillo/contraste)
+    ww = request.args.get('ww', default=400, type=float)
+    wc = request.args.get('wc', default=40, type=float)
 
     img2d, w_px, h_px = _slice_2d_and_target_size(view, layer, user_data)
-    if img2d is None: return "Error", 400
-
+    if img2d is None: return "Vista o índice no válido", 400
+    
+    print(f"DEBUG get_image: view={view}, img2d.shape={img2d.shape}, w_px={w_px}, h_px={h_px}, dims={user_data.get('dims')}")
+    # Aplica la conversión a Unidades Hounsfield
     slope = user_data.get("slope", 1.0); intercept = user_data.get("intercept", 0.0)
     hu2d = (img2d.astype(np.float32) * slope) + intercept
 
-    # Aplicar ventana (Normalizar 0 a 1 para Matplotlib)
-    lower, upper = wc - ww/2, wc + ww/2
-    img_norm = (np.clip(hu2d, lower, upper) - lower) / (upper - lower) if upper > lower else np.zeros_like(hu2d)
-    
-    # Calcular Aspect Ratio
-    dx, dy, dz = _extract_spacing_for_series(user_data.get("unique_id"), user_data)
-    v_lower = view.lower()
-    if v_lower == "axial": display_w, display_h = w_px, h_px
-    else: display_w, display_h = w_px, int(h_px * (dz/dx))
+    # Aplica la fórmula de Window Leveling
+    lower_bound = wc - (ww / 2); upper_bound = wc + (ww / 2)
+    image_scaled = np.clip(hu2d, lower_bound, upper_bound)
+    # Evitar división por cero si ww es 0
+    if (upper_bound - lower_bound) > 0:
+        image_scaled = (image_scaled - lower_bound) / (upper_bound - lower_bound) * 255.0
+    else:
+        image_scaled = np.zeros_like(image_scaled)
+    image_8bit = image_scaled.astype(np.uint8)
 
-    fig, ax = plt.subplots(figsize=(display_w/100, display_h/100), dpi=100)
+    # Dibuja la imagen con Matplotlib
+    dpi = 100.0
+    # Calculate display size based on physical scaling
+    dx, dy, dz = _extract_spacing_for_series(user_data.get("unique_id"), user_data)
+
+    # Determine aspect ratio based on view
+    v_lower = view.lower()
+    if v_lower == "axial":
+        display_w, display_h = w_px, h_px  # Already square in physical space
+    elif v_lower in ["coronal", "sagital", "sagittal"]:
+        # Scale height by slice thickness ratio (dz/dx)
+        aspect_ratio = dz / dx
+        display_w = w_px
+        display_h = int(h_px * aspect_ratio)
+    else:
+        display_w, display_h = w_px, h_px
+
+    print(f"DEBUG matplotlib: dx={dx}, dy={dy}, dz={dz}, aspect_ratio={dz/dx if v_lower in ['coronal','sagital','sagittal'] else 1.0}, display_w={display_w}, display_h={display_h}")
+
+    fig, ax = plt.subplots(figsize=(display_w / dpi, display_h / dpi), dpi=dpi)
+
+    # Remove all margins and padding so axes fill the entire figure
     fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
-    
-    # 1. DIBUJAR BASE CON COLORMAP (Lógica Luis)
-    ax.imshow(img_norm, cmap=cmap, vmin=0, vmax=1, interpolation="lanczos", aspect='auto')
+
+    # Use 'auto' aspect to let matplotlib stretch to fill the figure
+    ax.imshow(image_8bit, cmap="gray", vmin=0, vmax=255, interpolation="lanczos", aspect='auto')
     ax.axis("off")
 
-    # 2. OVERLAY RT STRUCT (Lógica Ivan - SE MANTIENE)
-    if 'RT_aligned' in user_data:
+    # Superpone la máscara de RT Struct si existe
+    rt = user_data.get('RT_aligned')
+    if rt is not None:
         try:
-            rt = user_data['RT_aligned']
-            if v_lower == 'axial': seg = rt[layer, :, :]
-            elif v_lower in ['sagital', 'sagittal']: seg = rt[:, :, layer]
-            elif v_lower == 'coronal': seg = rt[:, layer, :]
-            ax.imshow(ma.masked_where(seg==0, seg), cmap='Reds', alpha=0.8, aspect='auto', interpolation="nearest")
-        except: pass
-        
-    # 3. OVERLAY SEGMENTACIÓN MANUAL (Lógica Ivan - SE MANTIENE)
-    if user_data.get('segmentation_mask') is not None:
-        try:
-            mask = user_data['segmentation_mask']
-            if v_lower == 'axial': seg = mask[layer, :, :]
-            elif v_lower in ['sagital', 'sagittal']: seg = mask[:, :, layer]
-            elif v_lower == 'coronal': seg = mask[:, layer, :]
-            ax.imshow(ma.masked_where(seg==0, seg), cmap='Greens', alpha=0.6, aspect='auto', interpolation='nearest')
-        except: pass
+            v_lower = view.lower()
+            seg_slice = None
 
+            # Extract RT slice using SAME indexing as DICOM volume
+            # RT_aligned has shape (Z, Y, X) matching volume_raw
+            if v_lower == 'axial':
+                seg_slice = rt[layer, :, :]      # Shape: (Y, X) - matches DICOM
+            elif v_lower in ['sagital', 'sagittal']:
+                seg_slice = rt[:, :, layer]      # Shape: (Z, Y) - matches DICOM
+            elif v_lower == 'coronal':
+                seg_slice = rt[:, layer, :]      # Shape: (Z, X) - matches DICOM
+
+            if seg_slice is not None:
+                # Mask out zero values and overlay
+                masked_seg = ma.masked_where(seg_slice == 0, seg_slice)
+                ax.imshow(masked_seg, cmap='Reds', alpha=0.8, interpolation="nearest", aspect='auto')
+        except Exception as e:
+            print(f"RT overlay error: {e}")
+            pass
+
+    # Overlay segmentation mask if it exists
+    seg_mask = user_data.get('segmentation_mask')
+    if seg_mask is not None:
+        try:
+            v_lower = view.lower()
+            seg_slice = None
+
+            # Extract segmentation slice using SAME indexing as DICOM volume
+            # segmentation_mask has shape (Z, Y, X) matching volume_raw
+            if v_lower == 'axial':
+                seg_slice = seg_mask[layer, :, :]      # Shape: (Y, X) - matches DICOM
+            elif v_lower in ['sagital', 'sagittal']:
+                seg_slice = seg_mask[:, :, layer]      # Shape: (Z, Y) - matches DICOM
+            elif v_lower == 'coronal':
+                seg_slice = seg_mask[:, layer, :]      # Shape: (Z, X) - matches DICOM
+
+            if seg_slice is not None:
+                # Mask out zero values and overlay
+                masked_seg = ma.masked_where(seg_slice == 0, seg_slice)
+                ax.imshow(masked_seg, cmap='Greens', alpha=0.6, interpolation='nearest', aspect='auto')
+        except Exception as e:
+            print(f"Segmentation overlay error: {e}")
+            pass
+
+    # Guarda la imagen en un buffer en memoria y la envía al navegador
     buf = BytesIO()
+    # REMOVED bbox_inches='tight' - it was ignoring our figsize!
     fig.savefig(buf, format='png', transparent=True, pad_inches=0)
     plt.close(fig)
     buf.seek(0)
