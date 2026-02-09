@@ -18,6 +18,15 @@
         <div class="sidebar-group">
           <div class="sidebar-group-title">General</div>
           <div class="d-flex flex-wrap justify-content-center gap-2">
+              
+            <!-- ===== BOTÓN PLUGIN IA (POC) ===== -->
+              <button id="aiPluginBtn"
+                      class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip"
+                      data-bs-placement="right"
+                      title="Plugin IA (POC)">
+                  <i class="bi bi-cpu"></i>
+              </button>
 
               <button id="inspectorPluginBtn" class="btn btn-secondary btn-icon shadow-sm"
                       data-bs-toggle="tooltip" data-bs-placement="right"
@@ -263,6 +272,30 @@
                 </div>
             </div>
           </div>
+
+          <!-- ===== PANEL PLUGIN IA ===== -->
+          <div id="aiPluginContainer"
+              style="display:none;"
+              class="animate-fade-in">
+
+            <div class="tool-panel-title">
+                <i class="bi bi-cpu"></i> IA Tomografía (POC)
+            </div>
+
+            <div class="alert alert-dark border-secondary small">
+                Módulo experimental. No ejecuta modelos reales aún.
+            </div>
+
+            <button id="runAIPocBtn"
+                    class="btn btn-sm btn-primary w-100">
+                Ejecutar prueba
+            </button>
+
+            <pre id="aiResult"
+                class="mt-2 p-2 bg-black text-light small"
+                style="display:none;">-</pre>
+            </div>
+
 
           <div id="contrastEditorContainer" style="display: none;" class="animate-fade-in">
             <div class="tool-panel-title"><i class="bi bi-graph-up"></i> Histograma</div>

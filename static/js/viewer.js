@@ -18,6 +18,64 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- LÓGICA PARA BOTONES PERSONALIZADOS ---
+    // ================================
+        (() => {
+
+        const aiBtn = document.getElementById("aiPluginBtn");
+        const aiContainer = document.getElementById("aiPluginContainer");
+        const runBtn = document.getElementById("runAIPocBtn");
+        const resultBox = document.getElementById("aiResult");
+
+        // Si el HTML no existe, salir sin romper nada
+        if (!aiBtn || !aiContainer) return;
+
+        aiBtn.addEventListener("click", () => {
+
+            // Guardamos estado ANTES de ocultar todo
+            const wasVisible = aiContainer.style.display === "block";
+
+            // Oculta todos los paneles
+            if (typeof hideAllToolPanels === "function") {
+            hideAllToolPanels();
+            }
+
+            // Toggle
+            if (!wasVisible) {
+            aiContainer.style.display = "block";
+            }
+            // Si estaba visible, queda oculto (toggle OFF)
+        });
+
+        runBtn?.addEventListener("click", async () => {
+
+            if (!resultBox) return;
+
+            resultBox.style.display = "block";
+            resultBox.textContent = "Procesando (POC)...";
+
+            try {
+            const response = await fetch("/ai/poc", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({})
+            });
+
+            if (!response.ok) {
+                throw new Error("Ruta IA no disponible");
+            }
+
+            const data = await response.json();
+            resultBox.textContent = JSON.stringify(data, null, 2);
+
+            } catch (err) {
+            resultBox.textContent =
+                "POC activa.\nBackend aún no conectado.\nSin errores críticos.";
+            }
+        });
+
+        })();
+
+
     function setupCustomSpinner(inputId, step, updateCallback) {
         const input = document.getElementById(inputId);
         const minusBtn = document.getElementById(`${inputId}-minus`);

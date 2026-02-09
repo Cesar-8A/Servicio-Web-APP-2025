@@ -21,6 +21,7 @@ import numpy as np
 import numpy.ma as ma
 import pydicom  # Para leer archivos DICOM
 import nrrd     # Para leer archivos NRRD (RT Struct)
+from flask import jsonify
 
 # Librerías de visualización
 import pyvista as pv
@@ -29,6 +30,8 @@ import matplotlib
 matplotlib.use('Agg') # Modo no interactivo para servidores
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+
+from ai_plugins.poc_plugin import AIPocPlugin
 
 # --- CONFIGURACIÓN INICIAL DE PYVISTA ---
 pv.OFF_SCREEN = True # Asegura que PyVista no intente crear ventanas visibles
@@ -536,6 +539,17 @@ def render(render):
                            max_value_coronal=dims[1] - 1,
                            max_value_sagital=dims[2] - 1,
                            current_render_mode=current_mode)
+@app.route("/ai/poc", methods=["POST"])
+def ai_poc():
+
+    # Simulación de volumen DICOM
+    fake_volume = np.random.rand(64, 256, 256)
+
+    plugin = AIPocPlugin()
+    plugin.load()
+    result = plugin.predict(fake_volume)
+
+    return jsonify(result)
 
 @app.route('/update_render_mode', methods=['POST'])
 def update_render_mode():
