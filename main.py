@@ -29,6 +29,7 @@ import matplotlib
 matplotlib.use('Agg') # Modo no interactivo para servidores
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib.colors import LinearSegmentedColormap
 
 # --- CONFIGURACIÓN INICIAL DE PYVISTA ---
 pv.OFF_SCREEN = True # Asegura que PyVista no intente crear ventanas visibles
@@ -393,6 +394,7 @@ def process_selected_dicom():
     user_data['segmentation_active'] = False
     user_data['brush_size'] = 1
     user_data['paint_mode'] = 'paint'
+    user_data['last_polygon_operation'] = None  # For 1-level undo
 
     # --- CORRECCIÓN CLAVE: REGENERAR EL GRID 3D AQUÍ ---
     # En lugar de borrar 'vtk_panel_column', actualizamos 'grid_full'
@@ -602,7 +604,9 @@ def get_image(view, layer):
             if v_lower == 'axial': seg = mask[layer, :, :]
             elif v_lower in ['sagital', 'sagittal']: seg = mask[:, :, layer]
             elif v_lower == 'coronal': seg = mask[:, layer, :]
-            ax.imshow(ma.masked_where(seg==0, seg), cmap='Greens', alpha=0.6, aspect='auto', interpolation='nearest')
+            # Create custom cyan colormap (exact match with frontend #00FFFF)
+            cyan_cmap = LinearSegmentedColormap.from_list('cyan', ['#000000', '#00FFFF'])
+            ax.imshow(ma.masked_where(seg==0, seg), cmap=cyan_cmap, vmin=0, vmax=512, alpha=0.6, aspect='auto', interpolation='nearest')
         except: pass
 
     buf = BytesIO()
@@ -794,6 +798,16 @@ def fill_polygon():
     else:
         return jsonify({"status": "error", "message": "Invalid mode"}), 400
 
+    # --- STORE OPERATION FOR UNDO (before modifying mask) ---
+    # Store a snapshot of the mask before this operation
+    user_data['last_polygon_operation'] = {
+        'view': view,
+        'layer': layer,
+        'vertices': vertices,
+        'mode': mode,
+        'mask_before': seg_mask.copy()  # Full snapshot for 1-level undo
+    }
+
     # Convert to voxel coordinates and fill based on view
     try:
         if view == "axial":
@@ -849,6 +863,36 @@ def fill_polygon():
     except Exception as e:
         return jsonify({"status": "error", "message": f"Fill failed: {str(e)}"}), 500
 
+@app.route("/undo_last_polygon", methods=["POST"])
+def undo_last_polygon():
+    """Undoes the last polygon operation by restoring the mask snapshot."""
+    user_data = get_user_data()
+    last_op = user_data.get('last_polygon_operation')
+
+    if last_op is None:
+        return jsonify({"status": "error", "message": "No operation to undo"}), 400
+
+    seg_mask = user_data.get('segmentation_mask')
+    if seg_mask is None:
+        return jsonify({"status": "error", "message": "No segmentation mask found"}), 400
+
+    try:
+        # Restore mask to state before last polygon
+        mask_before = last_op.get('mask_before')
+        if mask_before is not None:
+            # Copy the snapshot back to the active mask
+            np.copyto(seg_mask, mask_before)
+
+            # Clear the last operation (can only undo once)
+            user_data['last_polygon_operation'] = None
+
+            return jsonify({"status": "success", "message": "Last polygon undone"})
+        else:
+            return jsonify({"status": "error", "message": "Snapshot not found"}), 500
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Undo failed: {str(e)}"}), 500
+
 @app.route("/clear_segmentation", methods=["POST"])
 def clear_segmentation():
     """Clears the segmentation mask by filling it with zeros."""
@@ -857,6 +901,8 @@ def clear_segmentation():
 
     if seg_mask is not None:
         seg_mask.fill(0)
+        # Clear undo history when clearing all
+        user_data['last_polygon_operation'] = None
         return jsonify({"status": "success", "message": "Segmentation cleared"})
 
     return jsonify({"status": "error", "message": "No segmentation mask found"}), 400
