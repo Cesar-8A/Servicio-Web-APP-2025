@@ -341,36 +341,55 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!baseImage || !canvas || !baseImage.complete || baseImage.naturalWidth === 0) return;
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-        // 1. Dimensiones internas reales
+        // 1. Sincronizar dimensiones internas
         canvas.width = baseImage.naturalWidth;
         canvas.height = baseImage.naturalHeight;
 
-        // 2. Centrado Inicial
+        // 2. LÓGICA DE CENTRADO SEGURO
         const zs = zoomState[view];
         const wrapper = canvas.parentElement;
+        // Solo centramos automáticamente si es la carga inicial (escala 1 y sin paneo)
         if (zs.scale === 1 && zs.panX === 0 && zs.panY === 0) {
             zs.panX = (wrapper.clientWidth - canvas.width) / 2;
             zs.panY = (wrapper.clientHeight - canvas.height) / 2;
         }
 
-        // 3. Dibujar imagen
+        // 3. Dibujar imagen base
         ctx.drawImage(baseImage, 0, 0);
 
-        // 4. Sincronizar Overlay (Solo si el tamaño cambió para no borrar contenido innecesariamente)
+        // 4. APLICAR LUT DEL HISTOGRAMA (Respuesta en tiempo real)
+        // Solo aplica si no hay un mapa de color activo (para no alterar colores térmicos/médicos)
+        if (viewState.colormap === 'gray' || !viewState.colormap) {
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            const lut = contrastState.lut;
+
+            for (let i = 0; i < data.length; i += 4) {
+                const val = data[i]; // Rojo (R=G=B en escala de grises)
+                const newVal = lut[val];
+                data[i] = data[i + 1] = data[i + 2] = newVal;
+            }
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+        // 5. SINCRONIZAR CAPAS (Imagen + Herramientas)
         if (overlay) {
+            // Evitamos borrar el overlay si el tamaño ya es correcto
             if (overlay.width !== canvas.width || overlay.height !== canvas.height) {
                 overlay.width = canvas.width;
                 overlay.height = canvas.height;
             }
             
-            // 5. Transformación Unificada
             const transform = `translate(${zs.panX}px, ${zs.panY}px) scale(${zs.scale})`;
             canvas.style.transform = transform;
+            canvas.style.transformOrigin = '0 0';
             overlay.style.transform = transform;
+            overlay.style.transformOrigin = '0 0';
         }
 
-        // 6. REDIBUJAR CRUZ: Si hay un punto seleccionado, lo pintamos tras la actualización
-        if (viewState.lastVoxel.x !== null) {
+        // 6. PERSISTENCIA DEL INSPECTOR
+        // Si el usuario marcó un punto, lo redibujamos automáticamente tras la actualización
+        if (viewState.lastVoxel && viewState.lastVoxel.x !== null) {
             drawCrosshairFromVoxel(view);
         }
 
@@ -686,16 +705,15 @@ document.addEventListener('DOMContentLoaded', function() {
         const view = canvasEl.id.split('_')[1]; 
         const zs = zoomState[view];
 
-        // 1. Posición del mouse relativa al contenedor estático (el cuadro negro)
+        // 1. Posición del mouse relativa al contenedor negro
         const mouseX = evt.clientX - wrapRect.left;
         const mouseY = evt.clientY - wrapRect.top;
 
-        // 2. FÓRMULA MAESTRA: Píxel = (Posición Mouse - Paneo) / Escala
-        // Esto "deshace" el zoom y el paneo para hallar la coordenada real
+        // 2. FÓRMULA MAESTRA: Píxel = (Mouse - Paneo) / Escala
         const xPix = (mouseX - zs.panX) / zs.scale;
         const yPix = (mouseY - zs.panY) / zs.scale;
 
-        // 3. Validar límites para no dar clics en el vacío negro
+        // 3. Validación de límites
         if (xPix < 0 || yPix < 0 || xPix >= canvasEl.width || yPix >= canvasEl.height) {
             return null;
         }
