@@ -365,9 +365,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const lut = contrastState.lut;
 
             for (let i = 0; i < data.length; i += 4) {
-                const val = data[i]; // Rojo (R=G=B en escala de grises)
-                const newVal = lut[val];
-                data[i] = data[i + 1] = data[i + 2] = newVal;
+                // Skip LUT for colored overlays (segmentation cyan, RT struct red)
+                const isGrayscale = (data[i] === data[i+1] && data[i+1] === data[i+2]);
+                if (isGrayscale) {
+                    const val = data[i]; // Rojo (R=G=B en escala de grises)
+                    const newVal = lut[val];
+                    data[i] = data[i + 1] = data[i + 2] = newVal;
+                }
+                // If not grayscale (colored overlay), preserve original RGB values
             }
             ctx.putImageData(imageData, 0, 0);
         }
