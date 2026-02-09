@@ -37,10 +37,7 @@ Esta plataforma proporciona capacidades completas para:
 - [🔒 Seguridad](#-seguridad)
 - [❓ FAQ & Troubleshooting](#-faq--troubleshooting)
 - [⚠️ Limitaciones Conocidas](#️-limitaciones-conocidas)
-- [🤝 Contribuciones](#-contribuciones)
 - [⚖️ Licencia](#️-licencia)
-- [📞 Contacto y Soporte](#-contacto-y-soporte)
-- [🗺️ Roadmap Futuro](#️-roadmap-futuro)
 
 ---
 
