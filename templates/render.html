@@ -165,6 +165,15 @@
                  </div>
              </div>
 
+             <div class="btn-group w-100 mb-2" role="group">
+                 <button id="undoSegBtn" class="btn btn-sm btn-outline-secondary" disabled>
+                     <i class="bi bi-arrow-counterclockwise"></i> Deshacer
+                 </button>
+                 <button id="redoSegBtn" class="btn btn-sm btn-outline-secondary" disabled>
+                     <i class="bi bi-arrow-clockwise"></i> Rehacer
+                 </button>
+             </div>
+
              <button id="paintModeToggleBtn" class="btn btn-sm btn-success w-100">
                  <i class="bi bi-brush-fill"></i> Modo: Pintar
              </button>
@@ -383,6 +392,33 @@
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="clearConfirmationModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="background-color: var(--gris-panel); border: 1px solid var(--gris-borde); color: var(--gris-texto);">
+
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title text-warning fw-bold">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i> Confirmar Borrado
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <p class="text-light mb-2">Esto borrará <strong>TODA</strong> la segmentación en <strong>TODAS</strong> las capas.</p>
+        <p class="text-danger mb-0"><i class="bi bi-info-circle-fill me-1"></i> Esta acción NO se puede deshacer.</p>
+      </div>
+
+      <div class="modal-footer border-secondary">
+        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" id="confirmClearBtn" class="btn btn-sm btn-danger">Sí, Borrar Todo</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div id="toastContainer" class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1050;"></div>
 
 {% endblock content %}
 {% endblock main_container %}

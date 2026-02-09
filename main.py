@@ -274,6 +274,37 @@ def _slice_2d_and_target_size(view, index, user_data):
     else: return None, None, None
     return img, max(1, int(w)), max(1, int(h))
 
+def _push_segmentation_state(user_data):
+    """Saves current segmentation state to history stack before modifications."""
+    seg_mask = user_data.get('segmentation_mask')
+    if seg_mask is None:
+        return
+
+    # Copy current state
+    current_state = np.copy(seg_mask)
+
+    # Get history data
+    stack = user_data.get('segmentation_history_stack', [])
+    index = user_data.get('segmentation_history_index', -1)
+    max_size = user_data.get('segmentation_history_max_size', 20)
+
+    # If user made changes after undoing, truncate forward history
+    if index < len(stack) - 1:
+        stack = stack[:index + 1]
+
+    # Append current state
+    stack.append(current_state)
+
+    # Remove oldest if exceeding max size
+    if len(stack) > max_size:
+        stack.pop(0)
+    else:
+        index += 1
+
+    # Update user data
+    user_data['segmentation_history_stack'] = stack
+    user_data['segmentation_history_index'] = index
+
 def process_dicom_folder(directory, user_data):
     """Lee una carpeta de archivos, los agrupa por series y extrae metadatos clave."""
     dicom_series = defaultdict(lambda: {
@@ -391,6 +422,11 @@ def process_selected_dicom():
     user_data['segmentation_active'] = False
     user_data['brush_size'] = 1
     user_data['paint_mode'] = 'paint'
+
+    # Initialize undo/redo history system
+    user_data['segmentation_history_stack'] = []
+    user_data['segmentation_history_index'] = -1
+    user_data['segmentation_history_max_size'] = 20
 
     # --- CORRECCIÓN CLAVE: REGENERAR EL GRID 3D AQUÍ ---
     # En lugar de borrar 'vtk_panel_column', actualizamos 'grid_full'
@@ -746,6 +782,9 @@ def paint_voxel():
     if not (0 <= z < Z and 0 <= yy < Y and 0 <= xx < X):
         return jsonify({"status": "error", "message": "Coordinates out of range"}), 400
 
+    # Push current state to history before modification
+    _push_segmentation_state(user_data)
+
     # Determine paint value
     if mode == 'paint':
         paint_value = 255
@@ -817,6 +856,9 @@ def fill_polygon():
     else:
         return jsonify({"status": "error", "message": "Invalid mode"}), 400
 
+    # Push current state to history before modification
+    _push_segmentation_state(user_data)
+
     # Convert to voxel coordinates and fill based on view
     try:
         if view == "axial":
@@ -879,10 +921,90 @@ def clear_segmentation():
     seg_mask = user_data.get('segmentation_mask')
 
     if seg_mask is not None:
+        # Push current state to history before clearing
+        _push_segmentation_state(user_data)
         seg_mask.fill(0)
         return jsonify({"status": "success", "message": "Segmentation cleared"})
 
     return jsonify({"status": "error", "message": "No segmentation mask found"}), 400
+
+@app.route("/undo_segmentation", methods=["POST"])
+def undo_segmentation():
+    """Undoes the last segmentation action by restoring previous state."""
+    user_data = get_user_data()
+
+    stack = user_data.get('segmentation_history_stack', [])
+    index = user_data.get('segmentation_history_index', -1)
+    seg_mask = user_data.get('segmentation_mask')
+
+    # Check if can undo
+    if not stack or index <= 0:
+        return jsonify({"status": "error", "message": "No hay cambios para deshacer"}), 400
+
+    # Decrement index
+    index -= 1
+    user_data['segmentation_history_index'] = index
+
+    # Restore state
+    if seg_mask is not None and index < len(stack):
+        np.copyto(seg_mask, stack[index])
+
+    return jsonify({
+        "status": "success",
+        "history_index": index,
+        "history_length": len(stack)
+    })
+
+@app.route("/redo_segmentation", methods=["POST"])
+def redo_segmentation():
+    """Redoes a previously undone segmentation action."""
+    user_data = get_user_data()
+
+    stack = user_data.get('segmentation_history_stack', [])
+    index = user_data.get('segmentation_history_index', -1)
+    seg_mask = user_data.get('segmentation_mask')
+
+    # Check if can redo
+    if not stack or index >= len(stack) - 1:
+        return jsonify({"status": "error", "message": "No hay cambios para rehacer"}), 400
+
+    # Increment index
+    index += 1
+    user_data['segmentation_history_index'] = index
+
+    # Restore state
+    if seg_mask is not None and index < len(stack):
+        np.copyto(seg_mask, stack[index])
+
+    return jsonify({
+        "status": "success",
+        "history_index": index,
+        "history_length": len(stack)
+    })
+
+@app.route("/get_history_state")
+def get_history_state():
+    """Returns the current state of undo/redo availability."""
+    user_data = get_user_data()
+
+    stack = user_data.get('segmentation_history_stack', [])
+    index = user_data.get('segmentation_history_index', -1)
+
+    if not stack:
+        return jsonify({
+            "can_undo": False,
+            "can_redo": False,
+            "history_length": 0
+        })
+
+    can_undo = index > 0
+    can_redo = index < len(stack) - 1
+
+    return jsonify({
+        "can_undo": can_undo,
+        "can_redo": can_redo,
+        "history_length": len(stack)
+    })
 
 @app.route("/export_segmentation", methods=["POST"])
 def export_segmentation():

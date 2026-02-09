@@ -82,6 +82,36 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     contrastState.lut = new Uint8ClampedArray(256).map((_, i) => i);
 
+    // --- TOAST NOTIFICATION HELPER ---
+    function showToast(message, type = 'success') {
+        const container = document.getElementById('toastContainer');
+        if (!container) return;
+
+        const toastId = 'toast-' + Date.now();
+        const bgClass = type === 'success' ? 'bg-success' : type === 'error' ? 'bg-danger' : 'bg-info';
+
+        const toastHTML = `
+            <div id="${toastId}" class="toast align-items-center text-white ${bgClass} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="d-flex">
+                    <div class="toast-body">
+                        ${message}
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+            </div>
+        `;
+
+        container.insertAdjacentHTML('beforeend', toastHTML);
+        const toastElement = document.getElementById(toastId);
+        const toast = new bootstrap.Toast(toastElement, { autohide: true, delay: 3000 });
+        toast.show();
+
+        // Remove from DOM after hidden
+        toastElement.addEventListener('hidden.bs.toast', () => {
+            toastElement.remove();
+        });
+    }
+
     // --- LÓGICA DE PLUGINS (Versión Limpia) ---
     function setupPluginButton(btnId, containerId, onToggleCallback) {
         const btn = document.getElementById(btnId);
@@ -678,16 +708,42 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function updateCursorStyle(cursorType) {
+    function updateCursorStyle(cursorType, cursorClass = null) {
         // Update cursor style for all view wrappers, canvases, and overlays
         VIEWS.forEach(view => {
             const wrapper = document.getElementById(`card_${view}`).querySelector('.image-wrapper');
             const canvas = document.getElementById(`canvas_${view}`);
             const overlay = document.getElementById(`overlay_${view}`);
 
-            if (wrapper) wrapper.style.cursor = cursorType;
-            if (canvas) canvas.style.cursor = cursorType;
-            if (overlay) overlay.style.cursor = cursorType;
+            if (cursorClass) {
+                // Apply CSS class cursor
+                if (wrapper) {
+                    wrapper.classList.remove('polygon-cursor');
+                    wrapper.classList.add(cursorClass);
+                }
+                if (canvas) {
+                    canvas.classList.remove('polygon-cursor');
+                    canvas.classList.add(cursorClass);
+                }
+                if (overlay) {
+                    overlay.classList.remove('polygon-cursor');
+                    overlay.classList.add(cursorClass);
+                }
+            } else {
+                // Remove CSS class and apply string cursor
+                if (wrapper) {
+                    wrapper.classList.remove('polygon-cursor');
+                    wrapper.style.cursor = cursorType;
+                }
+                if (canvas) {
+                    canvas.classList.remove('polygon-cursor');
+                    canvas.style.cursor = cursorType;
+                }
+                if (overlay) {
+                    overlay.classList.remove('polygon-cursor');
+                    overlay.style.cursor = cursorType;
+                }
+            }
         });
     }
 
@@ -929,6 +985,29 @@ document.addEventListener('DOMContentLoaded', function() {
         ctx.stroke();
     }
 
+    function drawBrushPreview(view, x, y) {
+        const overlay = document.getElementById(`overlay_${view}`);
+        const mainCanvas = document.getElementById(`canvas_${view}`);
+        if (!overlay || !mainCanvas) return;
+
+        const ctx = overlay.getContext("2d");
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+        const zs = zoomState[view];
+        const brushSize = viewState.brushSize;
+        const radius = brushSize / zs.scale;
+
+        // Draw circle preview
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 2 / zs.scale;
+        ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
+
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, 2 * Math.PI);
+        ctx.stroke();
+        ctx.fill();
+    }
+
     function syncViews(sourceView, x, y) {
         // DEPRECATED: Use syncViewsFromVoxel() instead
         // This function uses pixel coordinates which don't account for aspect ratio
@@ -1163,6 +1242,7 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(data => {
                 if (data.status === 'success') {
                     updateImage(view, layer, true);
+                    updateUndoRedoButtons();
                 }
             })
             .catch(error => {
@@ -1210,16 +1290,52 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // --- POLYGON MOUSEMOVE HANDLER (Preview Line) ---
+    // --- SEGMENTATION MOUSEMOVE HANDLERS (Brush Preview & Polygon Preview) ---
+    let brushPreviewCoords = {};
+    let brushAnimationFrameId = {};
+
     VIEWS.forEach(view => {
         const canvas = document.getElementById('canvas_' + view);
         if (canvas) {
+            // Brush preview handler with requestAnimationFrame throttling
             canvas.addEventListener('mousemove', (evt) => {
-                if (!viewState.segmentationMode || viewState.segmentationTool !== 'polygon') return;
-                if (!polygonState.isDrawing || polygonState.currentView !== view) return;
+                if (!viewState.segmentationMode) return;
 
-                const coords = cssToPngPixels(canvas, evt);
-                drawPolygon(view, coords.xPix, coords.yPix);
+                if (viewState.segmentationTool === 'brush') {
+                    // Store coordinates
+                    const coords = cssToPngPixels(canvas, evt);
+                    if (!coords) return;
+                    brushPreviewCoords[view] = coords;
+
+                    // Cancel pending animation frame
+                    if (brushAnimationFrameId[view]) {
+                        cancelAnimationFrame(brushAnimationFrameId[view]);
+                    }
+
+                    // Schedule draw at next frame (max 60fps)
+                    brushAnimationFrameId[view] = requestAnimationFrame(() => {
+                        if (brushPreviewCoords[view]) {
+                            drawBrushPreview(view, brushPreviewCoords[view].xPix, brushPreviewCoords[view].yPix);
+                        }
+                        brushAnimationFrameId[view] = null;
+                    });
+                } else if (viewState.segmentationTool === 'polygon') {
+                    // Polygon preview (existing logic)
+                    if (!polygonState.isDrawing || polygonState.currentView !== view) return;
+                    const coords = cssToPngPixels(canvas, evt);
+                    if (coords) drawPolygon(view, coords.xPix, coords.yPix, true);
+                }
+            });
+
+            // Clear preview on mouse leave
+            canvas.addEventListener('mouseleave', () => {
+                if (viewState.segmentationMode && viewState.segmentationTool === 'brush') {
+                    if (brushAnimationFrameId[view]) {
+                        cancelAnimationFrame(brushAnimationFrameId[view]);
+                        brushAnimationFrameId[view] = null;
+                    }
+                    clearOverlay(view);
+                }
             });
         }
     });
@@ -1261,6 +1377,26 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // --- KEYBOARD HANDLERS FOR UNDO/REDO ---
+    document.addEventListener('keydown', (evt) => {
+        // Check for Ctrl+Z (Undo) or Cmd+Z (Mac)
+        if ((evt.ctrlKey || evt.metaKey) && evt.key === 'z' && !evt.shiftKey) {
+            if (viewState.segmentationMode) {
+                evt.preventDefault();
+                performUndo();
+            }
+        }
+
+        // Check for Ctrl+Y (Redo) or Cmd+Y (Mac) or Ctrl+Shift+Z
+        if (((evt.ctrlKey || evt.metaKey) && evt.key === 'y') ||
+            ((evt.ctrlKey || evt.metaKey) && evt.shiftKey && evt.key === 'z')) {
+            if (viewState.segmentationMode) {
+                evt.preventDefault();
+                performRedo();
+            }
+        }
+    });
+
     // --- SEGMENTATION UI CONTROLS ---
 
     // Brush size radio buttons
@@ -1287,13 +1423,34 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Clear segmentation button
+    // Clear segmentation button - show confirmation modal
     const clearSegBtn = document.getElementById('clearSegmentationBtn');
-    if (clearSegBtn) {
+    const clearModal = document.getElementById('clearConfirmationModal');
+    if (clearSegBtn && clearModal) {
         clearSegBtn.addEventListener('click', () => {
-            if (!confirm('¿Borrar toda la segmentación?')) return;
+            const modal = new bootstrap.Modal(clearModal);
+            modal.show();
+        });
+    }
 
+    // Clear segmentation confirmation button in modal
+    const confirmClearBtn = document.getElementById('confirmClearBtn');
+    if (confirmClearBtn && clearModal) {
+        confirmClearBtn.addEventListener('click', () => {
+            const modal = bootstrap.Modal.getInstance(clearModal);
+            if (modal) modal.hide();
+
+            const loader = document.getElementById('loader-wrapper');
             const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+            // Show loader
+            if (loader) {
+                loader.style.display = 'flex';
+                loader.style.opacity = '1';
+            }
+
+            // Disable button during operation
+            confirmClearBtn.disabled = true;
 
             fetch('/clear_segmentation', {
                 method: 'POST',
@@ -1305,16 +1462,29 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
+                    showToast('Segmentación borrada', 'success');
                     // Reload all views
                     VIEWS.forEach(view => {
                         const slider = document.getElementById('slider_' + view);
                         const layer = parseInt(slider.value);
                         updateImage(view, layer);
                     });
+                    updateUndoRedoButtons();
+                } else {
+                    showToast('Error al borrar', 'error');
                 }
             })
             .catch(error => {
                 console.error('Clear error:', error);
+                showToast('Error al borrar', 'error');
+            })
+            .finally(() => {
+                // Hide loader and re-enable button
+                if (loader) {
+                    loader.style.opacity = '0';
+                    setTimeout(() => { loader.style.display = 'none'; }, 500);
+                }
+                confirmClearBtn.disabled = false;
             });
         });
     }
@@ -1349,6 +1519,116 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // --- UNDO/REDO FUNCTIONS ---
+    function performUndo() {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        const loader = document.getElementById('loader-wrapper');
+
+        if (loader) {
+            loader.style.display = 'flex';
+            loader.style.opacity = '1';
+        }
+
+        fetch('/undo_segmentation', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                showToast('Cambio deshecho', 'success');
+                // Reload all views
+                VIEWS.forEach(view => {
+                    const slider = document.getElementById('slider_' + view);
+                    if (slider) {
+                        const layer = parseInt(slider.value);
+                        updateImage(view, layer, true);
+                    }
+                });
+                updateUndoRedoButtons();
+            } else {
+                showToast(data.message || 'Error al deshacer', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Undo error:', error);
+            showToast('Error al deshacer', 'error');
+        })
+        .finally(() => {
+            if (loader) {
+                loader.style.opacity = '0';
+                setTimeout(() => { loader.style.display = 'none'; }, 500);
+            }
+        });
+    }
+
+    function performRedo() {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        const loader = document.getElementById('loader-wrapper');
+
+        if (loader) {
+            loader.style.display = 'flex';
+            loader.style.opacity = '1';
+        }
+
+        fetch('/redo_segmentation', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                showToast('Cambio rehecho', 'success');
+                // Reload all views
+                VIEWS.forEach(view => {
+                    const slider = document.getElementById('slider_' + view);
+                    if (slider) {
+                        const layer = parseInt(slider.value);
+                        updateImage(view, layer, true);
+                    }
+                });
+                updateUndoRedoButtons();
+            } else {
+                showToast(data.message || 'Error al rehacer', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Redo error:', error);
+            showToast('Error al rehacer', 'error');
+        })
+        .finally(() => {
+            if (loader) {
+                loader.style.opacity = '0';
+                setTimeout(() => { loader.style.display = 'none'; }, 500);
+            }
+        });
+    }
+
+    function updateUndoRedoButtons() {
+        fetch('/get_history_state')
+            .then(response => response.json())
+            .then(data => {
+                const undoBtn = document.getElementById('undoSegBtn');
+                const redoBtn = document.getElementById('redoSegBtn');
+
+                if (undoBtn) {
+                    undoBtn.disabled = !data.can_undo;
+                }
+                if (redoBtn) {
+                    redoBtn.disabled = !data.can_redo;
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching history state:', error);
+            });
+    }
+
     // --- POLYGON DRAWING FUNCTIONS ---
 
     function clearPolygon() {
@@ -1365,7 +1645,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (vertexCount) vertexCount.textContent = '0';
     }
 
-    function drawPolygon(view, previewX = null, previewY = null) {
+    function drawPolygon(view, previewX = null, previewY = null, showFill = false) {
         const overlay = document.getElementById(`overlay_${view}`);
         if (!overlay) return;
 
@@ -1377,24 +1657,42 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (polygonState.vertices.length === 0) return;
 
-        // Style
+        // Draw filled preview FIRST (so it appears behind strokes and vertices)
+        if (showFill && polygonState.vertices.length >= 3) {
+            ctx.fillStyle = 'rgba(0, 255, 255, 0.3)'; // Cyan with 30% opacity
+            ctx.beginPath();
+            ctx.moveTo(polygonState.vertices[0].x, polygonState.vertices[0].y);
+            for (let i = 1; i < polygonState.vertices.length; i++) {
+                ctx.lineTo(polygonState.vertices[i].x, polygonState.vertices[i].y);
+            }
+            // Close path if we have preview coords
+            if (previewX !== null && previewY !== null) {
+                ctx.lineTo(previewX, previewY);
+            }
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // Style for strokes and vertices
         ctx.strokeStyle = '#00FFFF'; // Cyan
         ctx.fillStyle = '#00FFFF';
         ctx.lineWidth = 2 / zs.scale;
 
-        // Draw vertices
+        // Draw connecting lines
+        for (let i = 0; i < polygonState.vertices.length; i++) {
+            if (i > 0) {
+                ctx.beginPath();
+                ctx.moveTo(polygonState.vertices[i - 1].x, polygonState.vertices[i - 1].y);
+                ctx.lineTo(polygonState.vertices[i].x, polygonState.vertices[i].y);
+                ctx.stroke();
+            }
+        }
+
+        // Draw vertices on top
         polygonState.vertices.forEach((vertex, index) => {
             ctx.beginPath();
             ctx.arc(vertex.x, vertex.y, 4 / zs.scale, 0, 2 * Math.PI);
             ctx.fill();
-
-            // Draw connecting lines
-            if (index > 0) {
-                ctx.beginPath();
-                ctx.moveTo(polygonState.vertices[index - 1].x, polygonState.vertices[index - 1].y);
-                ctx.lineTo(vertex.x, vertex.y);
-                ctx.stroke();
-            }
         });
 
         // Draw preview line (from last vertex to mouse position)
@@ -1462,6 +1760,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Clear polygon state
                 clearPolygon();
+
+                // Update undo/redo button states
+                updateUndoRedoButtons();
             } else {
                 alert('Error: ' + (data.message || 'Unknown error'));
             }
@@ -1487,12 +1788,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 polygonControls.style.display = 'none';
                 segToolInfo.innerHTML = '<i class="bi bi-info-circle"></i> Haz clic para pintar.';
 
+                // Set standard crosshair cursor
+                updateCursorStyle('crosshair');
+
                 // Clear any polygon in progress
                 clearPolygon();
             } else if (this.value === 'polygon') {
                 brushControls.style.display = 'none';
                 polygonControls.style.display = 'block';
                 segToolInfo.innerHTML = '<i class="bi bi-info-circle"></i> Clic para agregar vértices.';
+
+                // Set white crosshair cursor
+                updateCursorStyle('crosshair', 'polygon-cursor');
 
                 // Clear overlays
                 VIEWS.forEach(v => clearOverlay(v));
@@ -1597,6 +1904,20 @@ document.addEventListener('DOMContentLoaded', function() {
         contrastState.cutoff = parseFloat(cutoffInput.value) || 0;
         drawCurveAndHistogram();
     });
+
+    // Wire up undo/redo buttons
+    const undoBtn = document.getElementById('undoSegBtn');
+    const redoBtn = document.getElementById('redoSegBtn');
+    if (undoBtn) {
+        undoBtn.addEventListener('click', () => {
+            if (!undoBtn.disabled) performUndo();
+        });
+    }
+    if (redoBtn) {
+        redoBtn.addEventListener('click', () => {
+            if (!redoBtn.disabled) performRedo();
+        });
+    }
 
     setup3DRendererControls();
     loadMetadata();
