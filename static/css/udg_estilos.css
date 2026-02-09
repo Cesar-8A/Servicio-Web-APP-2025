@@ -561,6 +561,55 @@ input[type="file"]:focus::file-selector-button {
 }
 #metadataList span.val { color: var(--color-acento); text-align: right; font-weight: bold; margin-left: 10px; word-break: break-word; }
 
+/* ==========================================================================
+   10. ORIENTATION LABELS (ANATOMICAL DIRECTIONS)
+   ========================================================================== */
+/* Orientation labels for anatomical directions */
+.orientation-labels {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* Don't block canvas interactions */
+    z-index: 15; /* Above minimap (z-index: 10) */
+}
+
+.orientation-label {
+    position: absolute;
+    color: var(--amarillo-UDG); /* Gold color (stands out on any background) */
+    font-size: 14px;
+    font-weight: bold;
+    font-family: 'Arial', sans-serif;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9); /* Strong shadow for readability */
+    letter-spacing: 1px;
+    user-select: none; /* Prevent text selection */
+}
+
+.label-top {
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.label-bottom {
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.label-left {
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.label-right {
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
 /* =========================================
    AJUSTES RESPONSIVOS
    ========================================= */
