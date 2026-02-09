@@ -63,7 +63,8 @@ document.addEventListener('DOMContentLoaded', function() {
         vertices: [],           // Array of {x, y} in internal pixel coordinates
         isDrawing: false,       // Currently drawing a polygon?
         currentView: null,      // Which view (axial/sagital/coronal)
-        currentLayer: null      // Which slice index
+        currentLayer: null,     // Which slice index
+        lastOperation: null     // Store last polygon for undo: {view, layer, vertices, mode}
     };
     const zoomState = {
         axial:   { scale: 1, panX: 0, panY: 0, isDragging: false },
@@ -1433,8 +1434,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     VIEWS.forEach(view => {
                         const slider = document.getElementById('slider_' + view);
                         const layer = parseInt(slider.value);
-                        updateImage(view, layer);
+                        updateImage(view, layer, true);
                     });
+
+                    // Clear undo state and disable button
+                    polygonState.lastOperation = null;
+                    const undoBtn = document.getElementById('undoLastPolygonBtn');
+                    if (undoBtn) {
+                        undoBtn.disabled = true;
+                        undoBtn.classList.remove('btn-outline-warning');
+                        undoBtn.classList.add('btn-outline-secondary');
+                    }
                 }
             })
             .catch(error => {
@@ -1473,6 +1483,54 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Undo last polygon button
+    const undoLastPolygonBtn = document.getElementById('undoLastPolygonBtn');
+    if (undoLastPolygonBtn) {
+        undoLastPolygonBtn.addEventListener('click', () => {
+            if (!polygonState.lastOperation) {
+                alert('No hay operación para deshacer.');
+                return;
+            }
+
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+            fetch('/undo_last_polygon', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Reload all views to show updated segmentation
+                    VIEWS.forEach(view => {
+                        const slider = document.getElementById('slider_' + view);
+                        if (slider) {
+                            const layer = parseInt(slider.value);
+                            updateImage(view, layer, true);
+                        }
+                    });
+
+                    // Clear last operation and disable undo button
+                    polygonState.lastOperation = null;
+                    undoLastPolygonBtn.disabled = true;
+                    undoLastPolygonBtn.classList.remove('btn-outline-warning');
+                    undoLastPolygonBtn.classList.add('btn-outline-secondary');
+
+                    console.log('Undo successful');
+                } else {
+                    alert('Error al deshacer: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Undo error:', error);
+                alert('Error al deshacer: ' + error);
+            });
+        });
+    }
+
     // --- POLYGON DRAWING FUNCTIONS ---
 
     function clearPolygon() {
@@ -1501,9 +1559,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (polygonState.vertices.length === 0) return;
 
-        // Style
-        ctx.strokeStyle = '#00FFFF'; // Cyan
-        ctx.fillStyle = '#00FFFF';
+        // --- COLOR BASED ON PAINT/ERASE MODE ---
+        const isEraseMode = viewState.paintMode === 'erase';
+        const drawColor = isEraseMode ? '#FF0000' : '#00FFFF'; // Red for erase, Cyan for paint
+        const fillAlpha = isEraseMode ? 'rgba(255, 0, 0, 0.3)' : 'rgba(0, 255, 255, 0.3)';
+
+        // --- FILL PREVIEW (after 3+ vertices) ---
+        if (polygonState.vertices.length >= 3) {
+            ctx.fillStyle = fillAlpha; // Red or Cyan preview
+            ctx.beginPath();
+            ctx.moveTo(polygonState.vertices[0].x, polygonState.vertices[0].y);
+            for (let i = 1; i < polygonState.vertices.length; i++) {
+                ctx.lineTo(polygonState.vertices[i].x, polygonState.vertices[i].y);
+            }
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // --- VERTICES AND LINES ---
+        ctx.strokeStyle = drawColor; // Red or Cyan
+        ctx.fillStyle = drawColor;
         ctx.lineWidth = 2 / zs.scale;
 
         // Draw vertices
@@ -1524,7 +1599,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Draw preview line (from last vertex to mouse position)
         if (previewX !== null && previewY !== null && polygonState.vertices.length > 0) {
             const lastVertex = polygonState.vertices[polygonState.vertices.length - 1];
-            ctx.strokeStyle = '#00FFFF';
+            ctx.strokeStyle = drawColor;
             ctx.setLineDash([5 / zs.scale, 3 / zs.scale]);
             ctx.beginPath();
             ctx.moveTo(lastVertex.x, lastVertex.y);
@@ -1569,6 +1644,14 @@ document.addEventListener('DOMContentLoaded', function() {
             mode: viewState.paintMode
         };
 
+        // --- STORE OPERATION FOR UNDO (before sending) ---
+        polygonState.lastOperation = {
+            view: view,
+            layer: layer,
+            vertices: JSON.parse(JSON.stringify(polygonState.vertices)), // Deep copy
+            mode: viewState.paintMode
+        };
+
         // Send to backend
         fetch('/fill_polygon', {
             method: 'POST',
@@ -1581,18 +1664,35 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(response => response.json())
         .then(data => {
             if (data.status === 'success') {
-                // Reload image to show filled polygon
-                updateImage(view, layer, true);
+                // Reload ALL views to show filled polygon (fixes paint AND erase mode)
+                VIEWS.forEach(v => {
+                    const slider = document.getElementById('slider_' + v);
+                    if (slider) {
+                        updateImage(v, parseInt(slider.value), true);
+                    }
+                });
+
+                // Enable undo button
+                const undoBtn = document.getElementById('undoLastPolygonBtn');
+                if (undoBtn) {
+                    undoBtn.disabled = false;
+                    undoBtn.classList.remove('btn-outline-secondary');
+                    undoBtn.classList.add('btn-outline-warning');
+                }
 
                 // Clear polygon state
                 clearPolygon();
             } else {
                 alert('Error: ' + (data.message || 'Unknown error'));
+                // Don't store failed operation
+                polygonState.lastOperation = null;
             }
         })
         .catch(error => {
             console.error('Polygon fill error:', error);
             alert('Error al rellenar polígono: ' + error);
+            // Don't store failed operation
+            polygonState.lastOperation = null;
         });
     }
 
