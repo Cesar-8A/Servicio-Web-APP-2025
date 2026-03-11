@@ -1219,7 +1219,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                                 <div class="d-flex justify-content-between align-items-center pt-2" style="border-top: 1px solid #444;">
                                     <span style="color: #bbbbbb; font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase;">Densidad:</span>
-                                    <span style="color: #0dcaf0; font-weight: bold; font-size: 1rem;">${data.hu} HU</span>
+                                    <span style="color: #0dcaf0; font-weight: bold; font-size: 1rem;">${data.hu} UH</span>
                                 </div>
                             `;
                         }
@@ -1231,7 +1231,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 })
                 .catch(err => {
                     console.error("Inspector coordinate fetch error:", err);
-                    if (huResult) huResult.textContent = "Error al obtener valor HU.";
+                    if (huResult) huResult.textContent = "Error al obtener valor UH.";
                 });
         }
 
