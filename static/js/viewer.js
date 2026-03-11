@@ -55,7 +55,9 @@ document.addEventListener('DOMContentLoaded', function() {
         segmentationTool: 'brush', // 'brush' or 'polygon'
         scales: { axial: 1.0, coronal: 1.0, sagittal: 1.0 }, // Aspect ratio scaling factors
         colormap: 'gray',
-        lastVoxel: { x: null, y: null, z: null }
+        lastVoxel: { x: null, y: null, z: null },
+        activeSegmentationId: null,
+        segmentations: []
     };
 
     // --- POLYGON STATE ---
@@ -66,6 +68,7 @@ document.addEventListener('DOMContentLoaded', function() {
         currentLayer: null,     // Which slice index
         lastOperation: null     // Store last polygon for undo: {view, layer, vertices, mode}
     };
+    const segUndoState = {};  // {segmentationId: bool}
     const zoomState = {
         axial:   { scale: 1, panX: 0, panY: 0, isDragging: false },
         sagital: { scale: 1, panX: 0, panY: 0, isDragging: false },
@@ -316,17 +319,20 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- LÓGICA DE IMAGEN Y CANVAS ---
-    function updateImage(view, layer, forceReloadFromServer) {
+    function updateImage(view, layer, forceReloadFromServer, showLoader = false) {
         const slider = document.getElementById(`slider_${view}`);
         if (!slider) return;
         const currentLayer = layer ?? slider.value;
         if (forceReloadFromServer) {
+            if (showLoader) showViewLoader(view);
             const img = new Image();
             img.crossOrigin = "Anonymous";
             img.onload = () => {
+                if (showLoader) hideViewLoader(view);
                 viewState.baseImages[view] = img;
                 applyLutAndDraw(view);
             };
+            if (showLoader) img.onerror = () => hideViewLoader(view);
             const cmapParam = viewState.colormap ? `&cmap=${viewState.colormap}` : '';
             img.src = `/image/${view}/${currentLayer}?ww=${viewState.ww}&wc=${viewState.wc}${cmapParam}&t=${new Date().getTime()}`;
         } else {
@@ -737,6 +743,21 @@ document.addEventListener('DOMContentLoaded', function() {
              const ctx = overlay.getContext("2d");
              ctx.clearRect(0, 0, overlay.width, overlay.height);
         }
+    }
+
+    function showViewLoader(view) {
+        const wrapper = document.getElementById(`card_${view}`)?.querySelector('.image-wrapper');
+        if (!wrapper || wrapper.querySelector('.view-loading-overlay')) return;
+        const loader = document.createElement('div');
+        loader.className = 'view-loading-overlay';
+        loader.innerHTML = '<div class="spinner-border spinner-border-sm text-light" role="status"></div>';
+        wrapper.appendChild(loader);
+    }
+
+    function hideViewLoader(view) {
+        const wrapper = document.getElementById(`card_${view}`)?.querySelector('.image-wrapper');
+        if (!wrapper) return;
+        wrapper.querySelectorAll('.view-loading-overlay').forEach(el => el.remove());
     }
 
     function updateCursorStyle(cursorType) {
@@ -1253,9 +1274,235 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // --- MULTI-SEGMENTATION MANAGEMENT FUNCTIONS ---
+
+    function loadSegmentations() {
+        fetch('/get_segmentations')
+            .then(r => r.json())
+            .then(data => {
+                viewState.segmentations = data.segmentations;
+                viewState.activeSegmentationId = data.active_id;
+                // Rebuild segUndoState
+                data.segmentations.forEach(entry => {
+                    segUndoState[entry.id] = entry.has_undo;
+                });
+                renderSegmentationsList();
+                // Update undo button
+                const undoBtn = document.getElementById('undoLastPolygonBtn');
+                if (undoBtn) {
+                    if (viewState.activeSegmentationId !== null && segUndoState[viewState.activeSegmentationId]) {
+                        undoBtn.disabled = false;
+                        undoBtn.classList.remove('btn-outline-secondary');
+                        undoBtn.classList.add('btn-outline-warning');
+                    } else {
+                        undoBtn.disabled = true;
+                        undoBtn.classList.remove('btn-outline-warning');
+                        undoBtn.classList.add('btn-outline-secondary');
+                    }
+                }
+            })
+            .catch(err => console.error('loadSegmentations error:', err));
+    }
+
+    function renderSegmentationsList() {
+        const countDisplay = document.getElementById('segCountDisplay');
+        if (countDisplay) countDisplay.textContent = `${viewState.segmentations.length}/5`;
+
+        const newSegBtn = document.getElementById('newSegmentationBtn');
+        if (newSegBtn) {
+            newSegBtn.disabled = viewState.segmentations.length >= 5;
+        }
+
+        const container = document.getElementById('segmentationsListContainer');
+        if (!container) return;
+
+        if (viewState.segmentations.length === 0) {
+            container.innerHTML = '<p class="text-muted small text-center mb-1">No hay segmentaciones. Crea una nueva.</p>';
+            return;
+        }
+
+        container.innerHTML = '';
+        viewState.segmentations.forEach(entry => {
+            const row = document.createElement('div');
+            row.className = 'seg-row' + (entry.id === viewState.activeSegmentationId ? ' seg-row-active' : '');
+            row.dataset.segId = entry.id;
+
+            const swatch = document.createElement('span');
+            swatch.className = 'seg-color-swatch';
+            swatch.style.backgroundColor = entry.color;
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'seg-row-name';
+            nameSpan.textContent = entry.name;
+
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'seg-row-actions';
+
+            const visBtn = document.createElement('button');
+            visBtn.className = 'btn btn-sm seg-visibility-btn';
+            visBtn.dataset.segId = entry.id;
+            visBtn.title = entry.visible ? 'Ocultar' : 'Mostrar';
+            visBtn.innerHTML = `<i class="bi ${entry.visible ? 'bi-eye' : 'bi-eye-slash'}"></i>`;
+
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-sm btn-outline-danger seg-delete-btn';
+            delBtn.dataset.segId = entry.id;
+            delBtn.title = 'Eliminar';
+            delBtn.innerHTML = '<i class="bi bi-trash"></i>';
+
+            actionsDiv.appendChild(visBtn);
+            actionsDiv.appendChild(delBtn);
+
+            row.appendChild(swatch);
+            row.appendChild(nameSpan);
+            row.appendChild(actionsDiv);
+
+            row.addEventListener('click', () => setActiveSegmentation(parseInt(entry.id)));
+            visBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleSegmentationVisibility(parseInt(entry.id));
+            });
+            delBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                deleteSegmentation(parseInt(entry.id));
+            });
+
+            container.appendChild(row);
+        });
+    }
+
+    function showCreateSegmentationForm() {
+        const btn = document.getElementById('newSegmentationBtn');
+        const form = document.getElementById('createSegmentationForm');
+        const input = document.getElementById('newSegNameInput');
+        if (btn) btn.style.display = 'none';
+        if (form) form.style.display = 'block';
+        if (input) { input.value = ''; input.focus(); }
+    }
+
+    function hideCreateSegmentationForm() {
+        const btn = document.getElementById('newSegmentationBtn');
+        const form = document.getElementById('createSegmentationForm');
+        const input = document.getElementById('newSegNameInput');
+        if (btn) btn.style.display = '';
+        if (form) form.style.display = 'none';
+        if (input) { input.value = ''; input.classList.remove('is-invalid'); }
+    }
+
+    function submitCreateSegmentation() {
+        const input = document.getElementById('newSegNameInput');
+        if (!input) return;
+        const trimmedValue = input.value.trim();
+        if (!trimmedValue) {
+            input.classList.add('is-invalid');
+            return;
+        }
+        input.classList.remove('is-invalid');
+        const saveBtn = document.getElementById('saveNewSegBtn');
+        if (saveBtn) saveBtn.disabled = true;
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        fetch('/create_segmentation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({ name: trimmedValue })
+        })
+        .then(response => {
+            if (!response.ok) return response.json().then(d => { throw new Error(d.message || 'Error al crear'); });
+            return response.json();
+        })
+        .then(() => {
+            loadSegmentations();
+            hideCreateSegmentationForm();
+        })
+        .catch(err => { alert('Error: ' + err.message); })
+        .finally(() => { if (saveBtn) saveBtn.disabled = false; });
+    }
+
+    function deleteSegmentation(id) {
+        if (!confirm('¿Eliminar esta segmentación? Esta acción no se puede deshacer.')) return;
+        if (polygonState.isDrawing) clearPolygon();
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        fetch('/delete_segmentation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({ id: id })
+        })
+        .then(response => {
+            if (!response.ok) return response.json().then(d => { throw new Error(d.message || 'Error al eliminar'); });
+            return response.json();
+        })
+        .then(() => {
+            loadSegmentations();
+            VIEWS.forEach(view => {
+                const slider = document.getElementById('slider_' + view);
+                if (slider) updateImage(view, parseInt(slider.value), true, true);
+            });
+        })
+        .catch(err => { alert('Error: ' + err.message); });
+    }
+
+    function setActiveSegmentation(id) {
+        if (polygonState.isDrawing) clearPolygon();
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        fetch('/set_active_segmentation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({ id: id })
+        })
+        .then(response => {
+            if (!response.ok) return response.json().then(d => { throw new Error(d.message || 'Error'); });
+            return response.json();
+        })
+        .then(data => {
+            viewState.activeSegmentationId = data.id;
+            segUndoState[data.id] = data.has_undo;
+            renderSegmentationsList();
+            const undoBtn = document.getElementById('undoLastPolygonBtn');
+            if (undoBtn) {
+                if (data.has_undo) {
+                    undoBtn.disabled = false;
+                    undoBtn.classList.remove('btn-outline-secondary');
+                    undoBtn.classList.add('btn-outline-warning');
+                } else {
+                    undoBtn.disabled = true;
+                    undoBtn.classList.remove('btn-outline-warning');
+                    undoBtn.classList.add('btn-outline-secondary');
+                }
+            }
+        })
+        .catch(err => { alert('Error: ' + err.message); });
+    }
+
+    function toggleSegmentationVisibility(id) {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        fetch('/toggle_segmentation_visibility', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            body: JSON.stringify({ id: id })
+        })
+        .then(response => {
+            if (!response.ok) return response.json().then(d => { throw new Error(d.message || 'Error'); });
+            return response.json();
+        })
+        .then(data => {
+            const entry = viewState.segmentations.find(e => e.id === id);
+            if (entry) entry.visible = data.visible;
+            renderSegmentationsList();
+            VIEWS.forEach(view => {
+                const slider = document.getElementById('slider_' + view);
+                if (slider) updateImage(view, parseInt(slider.value), true, true);
+            });
+        })
+        .catch(err => { alert('Error: ' + err.message); });
+    }
+
     // --- SEGMENTATION CLICK HANDLER ---
     function handleSegmentationClick(view, evt) {
         if (!viewState.segmentationMode) return;
+        if (viewState.activeSegmentationId === null) {
+            alert('Crea o selecciona una segmentación primero.');
+            return;
+        }
 
         const canvas = document.getElementById('canvas_' + view);
         if (!canvas) return;
@@ -1292,7 +1539,7 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
-                    updateImage(view, layer, true);
+                    updateImage(view, layer, true, true);
                 }
             })
             .catch(error => {
@@ -1417,11 +1664,11 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Clear segmentation button
-    const clearSegBtn = document.getElementById('clearSegmentationBtn');
+    // Clear active segmentation button
+    const clearSegBtn = document.getElementById('clearActiveSegmentationBtn');
     if (clearSegBtn) {
         clearSegBtn.addEventListener('click', () => {
-            if (!confirm('¿Borrar toda la segmentación?')) return;
+            if (!confirm('¿Borrar la segmentación activa?')) return;
 
             const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
@@ -1439,11 +1686,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     VIEWS.forEach(view => {
                         const slider = document.getElementById('slider_' + view);
                         const layer = parseInt(slider.value);
-                        updateImage(view, layer, true);
+                        updateImage(view, layer, true, true);
                     });
 
                     // Clear undo state and disable button
                     polygonState.lastOperation = null;
+                    segUndoState[viewState.activeSegmentationId] = false;
                     const undoBtn = document.getElementById('undoLastPolygonBtn');
                     if (undoBtn) {
                         undoBtn.disabled = true;
@@ -1458,33 +1706,55 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Export segmentation button
-    const exportSegBtn = document.getElementById('exportSegmentationBtn');
-    if (exportSegBtn) {
-        exportSegBtn.addEventListener('click', () => {
+    // Export active segmentation button
+    const exportActiveSegBtn = document.getElementById('exportActiveSegBtn');
+    if (exportActiveSegBtn) {
+        exportActiveSegBtn.addEventListener('click', () => {
             const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-
             fetch('/export_segmentation', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfToken
-                }
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({ mode: 'active' })
             })
-            .then(response => response.blob())
+            .then(response => {
+                if (!response.ok) throw new Error('Export failed');
+                return response.blob();
+            })
             .then(blob => {
-                // Create download link
                 const a = document.createElement('a');
                 a.href = URL.createObjectURL(blob);
-                a.download = 'segmentation.nrrd';
+                a.download = 'segmentacion.nrrd';
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
             })
-            .catch(error => {
-                alert('Error al exportar: ' + error);
-                console.error('Export error:', error);
-            });
+            .catch(error => { alert('Error al exportar: ' + error); });
+        });
+    }
+
+    // Export all segmentations button
+    const exportAllSegBtn = document.getElementById('exportAllSegBtn');
+    if (exportAllSegBtn) {
+        exportAllSegBtn.addEventListener('click', () => {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            fetch('/export_segmentation', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({ mode: 'all' })
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Export failed');
+                return response.blob();
+            })
+            .then(blob => {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'segmentaciones.zip';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            })
+            .catch(error => { alert('Error al exportar: ' + error); });
         });
     }
 
@@ -1514,12 +1784,13 @@ document.addEventListener('DOMContentLoaded', function() {
                         const slider = document.getElementById('slider_' + view);
                         if (slider) {
                             const layer = parseInt(slider.value);
-                            updateImage(view, layer, true);
+                            updateImage(view, layer, true, true);
                         }
                     });
 
                     // Clear last operation and disable undo button
                     polygonState.lastOperation = null;
+                    segUndoState[viewState.activeSegmentationId] = false;
                     undoLastPolygonBtn.disabled = true;
                     undoLastPolygonBtn.classList.remove('btn-outline-warning');
                     undoLastPolygonBtn.classList.add('btn-outline-secondary');
@@ -1564,10 +1835,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (polygonState.vertices.length === 0) return;
 
-        // --- COLOR BASED ON PAINT/ERASE MODE ---
+        // --- COLOR BASED ON PAINT/ERASE MODE AND ACTIVE SEGMENTATION ---
         const isEraseMode = viewState.paintMode === 'erase';
-        const drawColor = isEraseMode ? '#FF0000' : '#00FFFF'; // Red for erase, Cyan for paint
-        const fillAlpha = isEraseMode ? 'rgba(255, 0, 0, 0.3)' : 'rgba(0, 255, 255, 0.3)';
+        const activeSeg = viewState.segmentations.find(s => s.id === viewState.activeSegmentationId);
+        const segColor = activeSeg ? activeSeg.color : '#00FFFF';
+        const drawColor = isEraseMode ? '#FF0000' : segColor;
+        const hex = isEraseMode ? '#FF0000' : segColor;
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        const fillAlpha = `rgba(${r}, ${g}, ${b}, 0.3)`;
 
         // --- FILL PREVIEW (after 3+ vertices) ---
         if (polygonState.vertices.length >= 3) {
@@ -1628,6 +1905,10 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function closeAndFillPolygon(view) {
+        if (viewState.activeSegmentationId === null) {
+            alert('Crea o selecciona una segmentación primero.');
+            return;
+        }
         if (polygonState.vertices.length < 3) {
             alert('Se necesitan al menos 3 vértices para crear un polígono.');
             clearPolygon();
@@ -1657,6 +1938,9 @@ document.addEventListener('DOMContentLoaded', function() {
             mode: viewState.paintMode
         };
 
+        // Show loaders immediately — covers both backend processing and image re-render time
+        VIEWS.forEach(v => showViewLoader(v));
+
         // Send to backend
         fetch('/fill_polygon', {
             method: 'POST',
@@ -1673,11 +1957,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 VIEWS.forEach(v => {
                     const slider = document.getElementById('slider_' + v);
                     if (slider) {
-                        updateImage(v, parseInt(slider.value), true);
+                        updateImage(v, parseInt(slider.value), true, true);
                     }
                 });
 
-                // Enable undo button
+                // Update segUndoState and enable undo button
+                segUndoState[viewState.activeSegmentationId] = true;
                 const undoBtn = document.getElementById('undoLastPolygonBtn');
                 if (undoBtn) {
                     undoBtn.disabled = false;
@@ -1688,12 +1973,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Clear polygon state
                 clearPolygon();
             } else {
+                VIEWS.forEach(v => hideViewLoader(v));
                 alert('Error: ' + (data.message || 'Unknown error'));
                 // Don't store failed operation
                 polygonState.lastOperation = null;
             }
         })
         .catch(error => {
+            VIEWS.forEach(v => hideViewLoader(v));
             console.error('Polygon fill error:', error);
             alert('Error al rellenar polígono: ' + error);
             // Don't store failed operation
@@ -1831,6 +2118,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
     setup3DRendererControls();
     loadMetadata();
+
+    // --- MULTI-SEGMENTATION UI EVENT LISTENERS ---
+    document.getElementById('newSegmentationBtn')?.addEventListener('click', showCreateSegmentationForm);
+    document.getElementById('saveNewSegBtn')?.addEventListener('click', submitCreateSegmentation);
+    document.getElementById('cancelNewSegBtn')?.addEventListener('click', hideCreateSegmentationForm);
+    document.getElementById('newSegNameInput')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); submitCreateSegmentation(); }
+    });
+
+    loadSegmentations();
 
     // Inicializa los sliders de corte y carga las imágenes iniciales.
 
