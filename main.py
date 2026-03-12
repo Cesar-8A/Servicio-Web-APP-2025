@@ -152,41 +152,47 @@ def create_or_get_plotter(user_data):
 
 def update_3d_render(user_data, mode):
     """
-    Actualiza el 3D. (Lógica Ivan + Mejoras Visuales Luis)
+    Actualiza el 3D con los valores originales de visualización.
     """
     plotter = user_data.get('vtk_plotter')
     panel_vtk = user_data.get('vtk_panel')
     grid = user_data.get('grid_full') 
+    modality = user_data.get('modality', 'CT')
     
     if not plotter or not panel_vtk or grid is None: return
 
-    # Recuperamos el colormap actual (o 'bone' por defecto)
     current_cmap = user_data.get('current_cmap', 'bone')
-
     plotter.clear()
-
+    
     if mode == 'isosurface':
         try:
-            surface_bone = grid.contour([175]) 
-            surface_skin = grid.contour([-200]) 
-            plotter.add_mesh(surface_bone, color="white", smooth_shading=True, name="bone")
-            plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, smooth_shading=True, name="skin")
+            if modality == 'MR':
+                # Lógica para MRI basada en intensidad máxima
+                data_values = grid.point_data["values"]
+                max_val = np.max(data_values)
+                surf_high = grid.contour([max_val * 0.60])
+                surf_tissue = grid.contour([max_val * 0.25])
+                plotter.add_mesh(surf_high, color="white", smooth_shading=True, name="high_signal")
+                plotter.add_mesh(surf_tissue, color="lightblue", opacity=0.3, smooth_shading=True, name="tissue")
+            else:
+                # Restauramos valores originales de CT (Ivan/Luis)
+                surface_bone = grid.contour([175]) 
+                surface_skin = grid.contour([-200]) 
+                plotter.add_mesh(surface_bone, color="white", smooth_shading=True, name="bone")
+                plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, smooth_shading=True, name="skin")
         except:
             plotter.add_volume(grid, cmap=current_cmap, opacity="linear", blending="composite")
 
-    elif mode == 'mip':
-        plotter.add_volume(grid, cmap=current_cmap, opacity="linear", blending="maximum")
+    elif mode in ['volume', 'mip', 'mip_inverted']:
+        blending = "maximum" if "mip" in mode else "composite"
+        cmap_to_use = current_cmap
+        if mode == 'mip_inverted':
+            cmap_to_use = f"{current_cmap}_r" if not current_cmap.endswith('_r') else current_cmap
+        
+        # Volvemos a la opacidad lineal que era más estable
+        plotter.add_volume(grid, cmap=cmap_to_use, opacity="linear", blending=blending)
 
-    elif mode == 'mip_inverted':
-        # Forzamos el mapa de color invertido si no lo está ya
-        cmap_inv = f"{current_cmap}_r" if not current_cmap.endswith('_r') else current_cmap
-        plotter.add_volume(grid, cmap=cmap_inv, opacity="linear", blending="maximum")
-    # ------------------------------------
-
-    else: # Volume
-        plotter.add_volume(grid, cmap=current_cmap, opacity="linear", blending="composite")
-
-    # Re-dibujar RT Struct si existe (Lógica de Ivan intacta)
+    # Re-dibujar RT Struct si existe
     if 'RT' in user_data and 'RT_aligned' in user_data:
         add_RT_to_plotter(user_data)
 
@@ -372,25 +378,42 @@ def process_selected_dicom():
     
     # 1. Cargar los nuevos datos 2D
     files = user_data['dicom_series'][unique_id]["ruta_archivos"]
+    ds_first = pydicom.dcmread(files[0], stop_before_pixels=True)
+    modality = str(ds_first.get("Modality", "CT")) # Default to CT if not found
+    
+    # --- EXTRACCIÓN DE SECUENCIA (Punto #3) ---
+    sequence_info = "N/A"
+    if modality == 'MR':
+        # Intentamos obtener la descripción de la serie o la secuencia de escaneo
+        desc = str(ds_first.get("SeriesDescription", ""))
+        scan_seq = str(ds_first.get("ScanningSequence", ""))
+        # Heurística simple para identificar las más comunes
+        if "T1" in desc.upper(): sequence_info = "T1-Weighted"
+        elif "T2" in desc.upper(): sequence_info = "T2-Weighted"
+        elif "FLAIR" in desc.upper(): sequence_info = "FLAIR"
+        elif desc: sequence_info = desc
+        elif scan_seq: sequence_info = scan_seq
+    
     slices = sorted([(int(pydicom.dcmread(f).InstanceNumber), pydicom.dcmread(f).pixel_array) for f in files])
     volume_raw = np.array([s[1] for s in slices])
     user_data['dicom_series'][unique_id]["slices"] = volume_raw
-    
+
     if volume_raw.size == 0: return jsonify({"error": "Serie sin slices"}), 400
-    
+
     # Metadatos básicos
     slope = float(user_data['dicom_series'][unique_id].get("RescaleSlope", 1.0))
     intercept = float(user_data['dicom_series'][unique_id].get("RescaleIntercept", 0.0))
     dx, dy, dz = _extract_spacing_for_series(unique_id, user_data)
     s_ax, s_co, s_sa = _compute_view_scales(dx, dy, dz)
-    
+
     # Actualizar sesión
     user_data.update({
         "volume_raw": volume_raw.astype(np.int16),
         "dims": volume_raw.shape,
         "slope": slope, "intercept": intercept,
-        "Image": (volume_raw * slope + intercept).astype(np.int16),
-        "scale_axial": s_ax, "scale_coronal": s_co, "scale_sagittal": s_sa
+        "modality": modality,
+        "sequence": sequence_info,
+        "Image": (volume_raw * slope + intercept).astype(np.int16),        "scale_axial": s_ax, "scale_coronal": s_co, "scale_sagittal": s_sa
     })
 
     # Initialize segmentation data model
@@ -440,31 +463,47 @@ def get_histogram():
     try:
         pixel_data = image.flatten()
         
-        # 1. Configuración Estricta solicitada
-        min_hu, max_hu = -1024, 1000
+        # 1. Configuración adaptada a la modalidad
+        modality = user_data.get('modality', 'CT')
+        if modality == 'MR':
+            min_val, max_val = int(np.min(pixel_data)), int(np.max(pixel_data))
+        else:
+            min_val, max_val = -1024, 1000
+
         num_bins = 300 # Cantidad de rectángulos
 
         # 2. Filtrar datos dentro del rango solicitado
         # Los valores fuera de este rango se ignoran para el gráfico (como en ITK-SNAP)
-        valid_pixels = pixel_data[(pixel_data >= min_hu) & (pixel_data <= max_hu)]
+        valid_pixels = pixel_data[(pixel_data >= min_val) & (pixel_data <= max_val)]
 
         # 3. Calcular histograma con 300 bins exactos
-        counts, bin_edges = np.histogram(valid_pixels, bins=num_bins, range=[min_hu, max_hu])
+        counts, bin_edges = np.histogram(valid_pixels, bins=num_bins, range=[min_val, max_val])
         
-        # Segmentos anatómicos (Se mantienen igual para la info extra)
-        segments = {
-            "Aire": int(np.sum(valid_pixels < -300)),
-            "Grasa": int(np.sum((valid_pixels >= -120) & (valid_pixels < -30))),
-            "Tejido": int(np.sum((valid_pixels >= 30) & (valid_pixels < 60))),
-            "Hueso": int(np.sum(valid_pixels > 300))
+        # 4. Estadísticas de Intensidad (Solicitadas para MRI y CT)
+        stats = {
+            "min": int(np.min(pixel_data)),
+            "max": int(np.max(pixel_data)),
+            "mean": round(float(np.mean(pixel_data)), 2)
         }
 
+        # Segmentos anatómicos (Solo para CT ya que dependen de valores HU fijos)
+        segments = None
+        if modality == 'CT':
+            segments = {
+                "Aire": int(np.sum(valid_pixels < -300)),
+                "Grasa": int(np.sum((valid_pixels >= -120) & (valid_pixels < -30))),
+                "Tejido": int(np.sum((valid_pixels >= 30) & (valid_pixels < 60))),
+                "Hueso": int(np.sum(valid_pixels > 300))
+            }
+
         return jsonify({
-            "mode": "tissue", # Usamos tissue para activar el modo de dibujo normal
+            "mode": "itk_snap", 
             "counts": counts.tolist(),
             "bin_edges": bin_edges.tolist(),
             "segments": segments,
-            "range": [min_hu, max_hu] # Enviamos el rango explícito
+            "stats": stats,
+            "range": [min_val, max_val],
+            "modality": modality
         })
 
     except Exception as e:
@@ -534,13 +573,17 @@ def render(render):
     dims = user_data.get("dims", (1, 1, 1))
     # Pasamos la variable 'render' a la plantilla
     current_mode = user_data.get('render_mode', 'isosurface')
+    modality = user_data.get('modality', 'CT')
+    sequence = user_data.get('sequence', 'N/A')
 
     # El cambio clave está aquí: 'render=render_type' se convierte en 'render=render'
     return render_template("render.html", success=1, render=render,
                            max_value_axial=dims[0] - 1,
                            max_value_coronal=dims[1] - 1,
                            max_value_sagital=dims[2] - 1,
-                           current_render_mode=current_mode)
+                           current_render_mode=current_mode,
+                           modality=modality,
+                           sequence=sequence)
 @app.route("/ai/poc", methods=["POST"])
 def ai_poc():
 
@@ -598,7 +641,8 @@ def get_image(view, layer):
     fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
     
     # 1. DIBUJAR BASE CON COLORMAP (Lógica Luis)
-    ax.imshow(img_norm, cmap=cmap, vmin=0, vmax=1, interpolation="lanczos", aspect='auto')
+    # Aplicamos interpolación 'bicubic' para suavizar los cortes reconstruidos (Sagital/Coronal)
+    ax.imshow(img_norm, cmap=cmap, vmin=0, vmax=1, interpolation="bicubic", aspect='auto')
     ax.axis("off")
 
     # 2. OVERLAY RT STRUCT (Lógica Ivan - SE MANTIENE)

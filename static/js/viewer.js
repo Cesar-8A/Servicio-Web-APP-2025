@@ -267,6 +267,24 @@ document.addEventListener('DOMContentLoaded', function() {
         VIEWS.forEach(view => updateImage(view, document.getElementById(`slider_${view}`)?.value, true));
     }
     
+    // --- EXPOSICIÓN GLOBAL DE PRESETS ---
+    // Esto permite que los botones del HTML con 'onclick' funcionen correctamente
+    window.setWindowPreset = function(preset) {
+        let ww, wc;
+        switch(preset) {
+            case 'LUNG': ww = 1500; wc = -600; break;
+            case 'BONE': ww = 2500; wc = 480; break;
+            case 'TISSUE': ww = 400; wc = 40; break;
+            case 'BRAIN': ww = 80; wc = 40; break;
+            case 'MR_AUTO': ww = 1000; wc = 500; break;
+            case 'MR_CONTRAST': ww = 600; wc = 300; break;
+            default: return;
+        }
+        // Llamamos a la función interna que ya maneja sliders y actualización de imágenes
+        updateWWWC(ww, wc);
+        highlightPreset(preset.startsWith('MR') ? null : `presetBtn${preset.charAt(0) + preset.slice(1).toLowerCase()}`);
+    };
+    
     // El debounce se mantiene para la escritura manual en los campos.
     const debouncedUpdateFromFields = debounce((ww, wc) => {
         updateWWWC(ww, wc, 'fields');
@@ -477,6 +495,18 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!response.ok) throw new Error('Failed to fetch histogram');
             const data = await response.json();
             contrastState.histogramData = data;
+            
+            // --- ACTUALIZAR ESTADÍSTICAS EN PANTALLA ---
+            if (data.stats) {
+                const minEl = document.getElementById('statMinVal');
+                const maxEl = document.getElementById('statMaxVal');
+                const meanEl = document.getElementById('statMeanVal');
+                
+                if (minEl) minEl.textContent = data.stats.min + (data.modality === 'CT' ? ' UH' : ' SI');
+                if (maxEl) maxEl.textContent = data.stats.max + (data.modality === 'CT' ? ' UH' : ' SI');
+                if (meanEl) meanEl.textContent = data.stats.mean + (data.modality === 'CT' ? ' UH' : ' SI');
+            }
+
             drawCurveAndHistogram();
         } catch (error) {
             console.error(error);
@@ -1276,8 +1306,8 @@ document.addEventListener('DOMContentLoaded', function() {
                                 </div>
 
                                 <div class="d-flex justify-content-between align-items-center pt-2" style="border-top: 1px solid #444;">
-                                    <span style="color: #bbbbbb; font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase;">Densidad:</span>
-                                    <span style="color: #0dcaf0; font-weight: bold; font-size: 1rem;">${data.hu} UH</span>
+                                    <span style="color: #bbbbbb; font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase;">${DICOM_MODALITY === 'MR' ? 'Intensidad' : 'Densidad'}:</span>
+                                    <span style="color: #0dcaf0; font-weight: bold; font-size: 1rem;">${data.hu} ${DICOM_MODALITY === 'MR' ? 'SI' : 'UH'}</span>
                                 </div>
                             `;
                         }

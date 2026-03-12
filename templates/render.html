@@ -30,13 +30,13 @@
 
               <button id="inspectorPluginBtn" class="btn btn-secondary btn-icon shadow-sm"
                       data-bs-toggle="tooltip" data-bs-placement="right"
-                      title="Inspector: Visualiza coordenadas y densidad.">
+                      title="Inspector: Visualiza coordenadas y {% if modality == 'MR' %}intensidad{% else %}densidad{% endif %}.">
                   <i class="bi bi-crosshair"></i>
               </button>
 
               <button id="windowLevelBtn" class="btn btn-secondary btn-icon shadow-sm"
                       data-bs-toggle="tooltip" data-bs-placement="right" 
-                      title="Ajuste de Ventana y Nivel (Brillo/Contraste).">
+                      title="Ajuste de Ventana y Nivel ({% if modality == 'MR' %}Brillo/Contraste{% else %}Densidad{% endif %}).">
                   <i class="bi bi-brightness-high"></i>
               </button>
               
@@ -80,10 +80,12 @@
             <select id="colormapSelect" class="form-select form-select-sm bg-dark text-light border-secondary">
                 <option value="gray" selected>Escala de Grises</option>
                 <option value="bone">Hueso (Bone)</option>
+                <option value="viridis">Percepción: Viridis (Recomendado)</option>
+                <option value="plasma">Percepción: Plasma</option>
+                <option value="inferno">Percepción: Inferno</option>
+                <option value="coolwarm">Diferencial: Coolwarm</option>
                 <option value="jet">Arcoiris (Jet)</option>
                 <option value="hot">Térmico (Hot)</option>
-                <option value="magma">Magma</option>
-                <option value="Spectral">Espectral</option>
             </select>
           </div>
 
@@ -305,8 +307,14 @@
               class="animate-fade-in">
 
             <div class="tool-panel-title">
-                <i class="bi bi-cpu"></i> IA Tomografía (POC)
+                <i class="bi bi-cpu"></i> IA {% if modality == 'MR' %}Resonancia{% else %}Tomografía{% endif %} (POC)
             </div>
+
+            {% if modality == 'MR' %}
+            <div class="badge bg-info text-dark w-100 mb-2 p-2" style="font-size: 0.75rem;">
+                <i class="bi bi-info-circle"></i> Secuencia: {{ sequence }}
+            </div>
+            {% endif %}
 
             <div class="alert alert-dark border-secondary small">
                 Módulo experimental. No ejecuta modelos reales aún.
@@ -325,6 +333,40 @@
 
           <div id="contrastEditorContainer" style="display: none;" class="animate-fade-in">
             <div class="tool-panel-title"><i class="bi bi-graph-up"></i> Histograma</div>
+            
+            <!-- PRESETS DE VENTANA -->
+            <div class="mb-3">
+                <label class="small text-secondary mb-2 d-block">Presets de Ventana:</label>
+                <div class="d-flex flex-wrap gap-1">
+                    {% if modality == 'MR' %}
+                        <button class="btn btn-xs btn-outline-info flex-grow-1" onclick="setWindowPreset('MR_AUTO')">Optimizar</button>
+                        <button class="btn btn-xs btn-outline-secondary flex-grow-1" onclick="setWindowPreset('MR_CONTRAST')">Alto Contraste</button>
+                    {% else %}
+                        <button class="btn btn-xs btn-outline-info" style="font-size: 0.7rem;" onclick="setWindowPreset('LUNG')">Pulmón</button>
+                        <button class="btn btn-xs btn-outline-info" style="font-size: 0.7rem;" onclick="setWindowPreset('BONE')">Hueso</button>
+                        <button class="btn btn-xs btn-outline-info" style="font-size: 0.7rem;" onclick="setWindowPreset('TISSUE')">Tejido</button>
+                        <button class="btn btn-xs btn-outline-info" style="font-size: 0.7rem;" onclick="setWindowPreset('BRAIN')">Cerebro</button>
+                    {% endif %}
+                </div>
+            </div>
+
+            <canvas id="histogramCanvas" width="250" height="100" class="mb-3 border border-secondary rounded"></canvas>
+
+            <!-- ESTADÍSTICAS DE INTENSIDAD -->
+            <div id="intensityStatsContainer" class="bg-dark bg-opacity-50 p-2 rounded border border-secondary mb-3">
+                <div class="d-flex justify-content-between mb-1">
+                    <span class="text-muted small text-uppercase" style="font-size: 0.65rem; letter-spacing: 1px;">Mínimo</span>
+                    <span id="statMinVal" class="text-light small fw-bold font-monospace">-</span>
+                </div>
+                <div class="d-flex justify-content-between mb-1">
+                    <span class="text-muted small text-uppercase" style="font-size: 0.65rem; letter-spacing: 1px;">Máximo</span>
+                    <span id="statMaxVal" class="text-light small fw-bold font-monospace">-</span>
+                </div>
+                <div class="d-flex justify-content-between">
+                    <span class="text-muted small text-uppercase" style="font-size: 0.65rem; letter-spacing: 1px;">Media</span>
+                    <span id="statMeanVal" class="text-info small fw-bold font-monospace">-</span>
+                </div>
+            </div>
 
             <div id="curve-editor-wrapper" class="w-100 border border-secondary rounded position-relative bg-black mb-3" style="aspect-ratio: 1.7/1;">
                 <canvas id="histogramCanvas" class="position-absolute top-0 start-0 w-100 h-100"></canvas>
@@ -458,6 +500,9 @@
   </div>
 </div>
 
+<script>
+    const DICOM_MODALITY = "{{ modality }}";
+</script>
 <script src="{{ url_for('static', filename='js/viewer.js') }}"></script>
 
 <div class="modal fade" id="metadataModal" tabindex="-1" aria-hidden="true">
