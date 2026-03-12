@@ -18,6 +18,10 @@ from io import BytesIO
 
 # Librerías para procesamiento científico y de imágenes
 import numpy as np
+import nibabel as nib
+from scipy.ndimage import zoom
+import subprocess
+import json
 import numpy.ma as ma
 import pydicom  # Para leer archivos DICOM
 import nrrd     # Para leer archivos NRRD (RT Struct)
@@ -128,6 +132,7 @@ def create_or_get_plotter(user_data):
     # Configuración inicial del plotter
     plotter = pv.Plotter(off_screen=True)
     plotter.set_background("black")
+    plotter.enable_depth_peeling()
     
     panel_vtk = pn.pane.VTK(plotter.ren_win, width=400, height=500, name='vtk_pane')
     panel_column = pn.Column(panel_vtk)
@@ -184,6 +189,10 @@ def update_3d_render(user_data, mode):
     # Re-dibujar RT Struct si existe (Lógica de Ivan intacta)
     if 'RT' in user_data and 'RT_aligned' in user_data:
         add_RT_to_plotter(user_data)
+        
+    # Re-dibujar Segmentación (IA o manual) si tiene contenido <---
+    if 'segmentation_mask' in user_data and np.any(user_data['segmentation_mask']):
+        add_segmentation_to_plotter(user_data)
 
     plotter.view_isometric()
     panel_vtk.param.trigger('object')
@@ -242,6 +251,50 @@ def add_RT_to_plotter(user_data):
         error_msg = f"Error crítico RT: {str(e)}"
         print(error_msg)
         return False, error_msg
+    
+def add_segmentation_to_plotter(user_data):
+    """
+    Convierte la máscara de segmentación en un objeto 3D flotante.
+    """
+    plotter = user_data.get('vtk_plotter')
+    panel_vtk = user_data.get('vtk_panel')
+    grid_full = user_data.get('grid_full')
+    seg_mask = user_data.get('segmentation_mask')
+
+    if not all([plotter, panel_vtk, grid_full is not None, seg_mask is not None]):
+        return False
+
+    try:
+        # Verificar matemáticamente que la máscara no esté vacía
+        if np.max(seg_mask) == 0:
+            print("ADVERTENCIA: La máscara 3D está vacía (puros ceros). No se renderizará.")
+            return False
+
+        seg_dims = np.array(seg_mask.shape) + 1
+        seg_grid = pv.ImageData(
+            dimensions=seg_dims,
+            spacing=grid_full.spacing,
+            origin=grid_full.origin
+        )
+
+        seg_grid.cell_data["values"] = seg_mask.flatten(order="F")
+        seg_grid = seg_grid.cell_data_to_point_data()
+
+        # Usamos 1.0 como contorno para asegurar que atrape cualquier valor detectado
+        surface = seg_grid.contour([1.0])
+
+        if surface.n_points == 0:
+            print("ADVERTENCIA: El contorno 3D no generó geometría.")
+            return False
+
+        # Opacity 1.0 para que sea una roca sólida color Cyan, imposible de perder de vista
+        plotter.add_mesh(surface, color="cyan", opacity=1.0, name="ia_segmentation", smooth_shading=True)
+        print(">>> Malla 3D Cyan agregada exitosamente al visor <<<")
+
+        return True
+    except Exception as e:
+        print(f"Error al renderizar segmentación de IA en 3D: {e}")
+        return False
 
 def _extract_spacing_for_series(unique_id, user_data):
     """Calcula el espaciado entre píxeles (dx, dy, dz) de forma robusta."""
@@ -1039,7 +1092,131 @@ def logout():
     flash('Has cerrado sesión', 'info')
     return redirect(url_for('home'))
 
+# --- LÓGICA DE IA SWIN-UNETR ---
+
+def ejecutar_ia_swin(dicom_input_path, output_folder):
+    """
+    Llama al microservicio de IA usando la ruta absoluta del ejecutable
+    para evitar conflictos de entornos virtuales en Windows.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    ruta_script = os.path.join(base_dir, 'plugin_ia_swin', 'run_ai_cli.py')
+    ruta_pesos = os.path.join(base_dir, 'plugin_ia_swin', 'best_swin_unetr_model.pth')
+    
+    # RUTA DIRECTA AL PYTHON DE LA IA (Basado en tu log de instalación)
+    python_ia_exe = r"C:\Users\jesus\anaconda3\envs\medaimg\python.exe"
+    
+    comando = [
+        python_ia_exe, ruta_script,
+        "--input", dicom_input_path,
+        "--out_dir", output_folder,
+        "--weights", ruta_pesos
+    ]
+    
+    print(f"\nIniciando Motor de IA...")
+    print(f"Ejecutando: {' '.join(comando)}\n")
+    
+    proceso = subprocess.run(comando, capture_output=True, text=True)
+    
+    try:
+        # Buscamos la respuesta JSON en la salida
+        lineas = [line for line in proceso.stdout.strip().split('\n') if line]
+        if not lineas:
+            raise ValueError("El script de IA no devolvió ninguna salida.")
+            
+        respuesta = json.loads(lineas[-1])
+        return respuesta
+    except Exception as e:
+        print(">>> ERROR CRÍTICO EN IA <<<")
+        print("STDOUT:", proceso.stdout)
+        print("STDERR:", proceso.stderr)
+        return {"status": "error", "message": "Fallo al ejecutar el modelo de IA. Revisa la consola."}
+
+
+@app.route('/api/run_ai_segmentation', methods=['POST'])
+def api_run_ai_segmentation():
+    """Endpoint que recibe la orden desde viewer.js"""
+    user_data = get_user_data()
+    unique_id = user_data.get('unique_id')
+    
+    if not unique_id or 'dicom_series' not in user_data or unique_id not in user_data['dicom_series']:
+        return jsonify({"status": "error", "message": "No hay un estudio cargado en el visor."})
+        
+    rutas = user_data['dicom_series'][unique_id]["ruta_archivos"]
+    if not rutas:
+        return jsonify({"status": "error", "message": "No se encontraron los archivos DICOM físicos."})
+        
+    # FORZAMOS LA RUTA ABSOLUTA PARA EL DICOM
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    dicom_input_path = os.path.abspath(os.path.join(base_dir, rutas[0]))
+    
+    out_dir = os.path.abspath(os.path.join(base_dir, 'anonimizado', 'AI_RESULTS'))
+    os.makedirs(out_dir, exist_ok=True)
+    
+    # 1. Llamar a la red neuronal
+    resultado = ejecutar_ia_swin(dicom_input_path, out_dir)
+    
+    if resultado.get("status") == "success":
+        mask_path = resultado.get("mask_path")
+        
+        try:
+            # 2. Cargar el resultado (.nii.gz)
+            nifti_img = nib.load(mask_path)
+            mask_data = nifti_img.get_fdata()
+            
+            # Transponer a (Z, Y, X)
+            if mask_data.ndim == 3:
+                mask_data = np.transpose(mask_data, (2, 1, 0))
+            
+            # 3. ALINEACIÓN ESPACIAL PERFECTA (Revertir el recorte del modelo)
+            target_shape = user_data['dims'] 
+            if mask_data.shape != target_shape:
+                print(f"Centrando máscara IA de {mask_data.shape} a original {target_shape}...")
+                aligned_mask = np.zeros(target_shape, dtype=mask_data.dtype)
+                
+                idx_m, idx_t = [], []
+                # Esta matemática detecta si la IA recortó o rellenó los bordes,
+                # y vuelve a colocar la máscara exactamente en el centro real del paciente.
+                for m_dim, t_dim in zip(mask_data.shape, target_shape):
+                    if m_dim > t_dim:
+                        start = (m_dim - t_dim) // 2
+                        idx_m.append(slice(start, start + t_dim))
+                        idx_t.append(slice(None))
+                    else:
+                        start = (t_dim - m_dim) // 2
+                        idx_m.append(slice(None))
+                        idx_t.append(slice(start, start + m_dim))
+                        
+                aligned_mask[tuple(idx_t)] = mask_data[tuple(idx_m)]
+                mask_data = aligned_mask
+            
+            # 4. FILTRAR LA LESIÓN
+            # La IA devuelve valores (0, 1, 2...). Nos quedamos con el valor más alto (la estructura principal)
+            max_class = np.max(mask_data)
+            if max_class > 0:
+                print(f"Se detectó estructura de clase {max_class}. Pintando en visor...")
+                # Convertimos a 255 para que el pincel Cyan del visor lo dibuje bien
+                mask_data = np.where(mask_data == max_class, 255, 0).astype(np.uint8)
+            else:
+                print("La IA no detectó ninguna anomalía/estructura en este estudio.")
+                mask_data = np.zeros(target_shape, dtype=np.uint8)
+            
+            # 5. Inyectar al lienzo interactivo
+            user_data['segmentation_mask'] = mask_data
+            user_data['segmentation_active'] = True
+            
+            print(f"\n[ÉXITO] IA finalizada. Resultado en pantalla.")
+            return jsonify({"status": "success"})
+            
+        except Exception as e:
+            print(f"Error procesando la máscara final: {e}")
+            return jsonify({"status": "error", "message": "La IA terminó, pero hubo un error al alinear la imagen."})
+            
+    else:
+        return jsonify({"status": "error", "message": resultado.get("message", "Error desconocido")})
+
 # --- 8. INICIO DE LA APLICACIÓN ---
 if __name__ == '__main__':
     # Se ejecuta solo cuando el script es el punto de entrada principal
-    app.run(debug=True, port=5001)
+    app.run(debug=True, port=5001, threaded=False)

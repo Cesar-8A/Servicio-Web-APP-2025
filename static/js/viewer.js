@@ -1724,6 +1724,63 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
+    // --- LÓGICA DEL PLUGIN DE INTELIGENCIA ARTIFICIAL ---
+    const runAiBtn = document.getElementById('runAiBtn');
+    if (runAiBtn) {
+        runAiBtn.addEventListener('click', () => {
+            // Confirmación porque es un proceso pesado
+            if (!confirm("Esto iniciará la red neuronal para segmentar la imagen. El proceso puede tardar entre 30 segundos y varios minutos dependiendo del hardware. ¿Deseas continuar?")) return;
+
+            // 1. Mostrar pantalla de carga y bloquear botón
+            const loader = document.getElementById('loader-wrapper');
+            if (loader) { loader.style.display = 'flex'; loader.style.opacity = '1'; }
+            runAiBtn.disabled = true;
+            runAiBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Procesando IA...';
+
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+            // 2. Hacer la petición al servidor web
+            fetch('/api/run_ai_segmentation', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert("Segmentación inteligente completada con éxito.");
+                    
+                    // 3. Forzar recarga de las 3 vistas para que se dibuje la nueva segmentación
+                    VIEWS.forEach(view => {
+                        const slider = document.getElementById(`slider_${view}`);
+                        if (slider) updateImage(view, slider.value, true);
+                    });
+                    
+                    // Forzar recarga del modelo 3D (si existe)
+                    const iframe = document.getElementById('DicomRender');
+                    if (iframe) iframe.src = iframe.src.split('?')[0] + '?t=' + new Date().getTime();
+                } else {
+                    alert("⚠️ Error en IA: " + data.message);
+                }
+            })
+            .catch(error => {
+                console.error("Error de red con la IA:", error);
+                alert("Ocurrió un error de conexión al procesar la IA.");
+            })
+            .finally(() => {
+                // 4. Ocultar loader y restaurar botón, pase lo que pase
+                if (loader) {
+                    loader.style.opacity = '0';
+                    setTimeout(() => { loader.style.display = 'none'; }, 500);
+                }
+                runAiBtn.disabled = false;
+                runAiBtn.innerHTML = '<i class="bi bi-cpu"></i> Auto-Segmentar (Swin-UNETR)';
+            });
+        });
+    }
+
     // --- CARGAR METADATA ---
     async function loadMetadata() {
         // Buscamos el cuerpo de la tabla del modal
