@@ -2,12 +2,12 @@
 
 {% block content %}
 <div class="text-center">
-  <h1>Bienvenido al Sistema de Gestión DICOM</h1>
+  <h1>Bienvenido al Sistema de Gestión de Imágenes Médicas</h1>
   <p class="lead">Carga, anonimiza y visualiza tus imágenes médicas con facilidad.</p>
 
   <div class="d-flex justify-content-center gap-4 mt-4 flex-wrap">
     <a href="{{ url_for('loadDicom') }}" class="btn btn-lg btn-secondary shadow-sm" style="min-width: 180px;">
-      <i class="bi bi-upload"></i><br> Subir DICOM
+      <i class="bi bi-upload"></i><br> Subir Imagen
     </a>
     <!--
     <a href="{{ url_for('anonimize') }}" class="btn btn-lg btn-secondary shadow-sm" style="min-width: 180px;">
@@ -26,7 +26,7 @@
 
   <h4>¿Cómo empezar?</h4>
   <ol class="text-start mx-auto" style="max-width: 500px; color: var(--gris-claro);">
-    <li>Sube tus archivos DICOM desde la sección "Subir DICOM".</li>
+    <li>Sube tus imágenes desde la sección "Subir Imagen".</li>
     <!--<li>Anonimiza los datos sensibles en la pestaña "Anonimizar".</li> -->
     <li>Visualiza las imágenes con diferentes vistas para revisión.</li>
     <li>Exporta los archivos ya procesados para su uso seguro.</li>

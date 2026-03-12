@@ -30,6 +30,7 @@ import matplotlib
 matplotlib.use('Agg') # Modo no interactivo para servidores
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib.colors import LinearSegmentedColormap
 
 from ai_plugins.poc_plugin import AIPocPlugin
 
@@ -83,6 +84,8 @@ ANONIMIZADO_FOLDER = os.path.join(os.getcwd(), 'anonimizado')
 for folder in [UPLOAD_FOLDER, UPLOAD_FOLDER_NRRD, ANONIMIZADO_FOLDER]:
     if not os.path.exists(folder):
         os.makedirs(folder)
+
+SEGMENTATION_COLORS = ['#00FFFF', '#ADFF2F', '#FF8C00', '#FF00FF', '#FFD700']
 
 # Inicialización de Panel y Bokeh para la vista 3D
 pn.extension('vtk')
@@ -390,10 +393,9 @@ def process_selected_dicom():
         "scale_axial": s_ax, "scale_coronal": s_co, "scale_sagittal": s_sa
     })
 
-    # Initialize segmentation mask
-    dims = volume_raw.shape
-    user_data['segmentation_mask'] = np.zeros(dims, dtype=np.uint8)
-    user_data['segmentation_active'] = False
+    # Initialize segmentation data model
+    user_data['segmentations'] = {}
+    user_data['active_segmentation_id'] = None
     user_data['brush_size'] = 1
     user_data['paint_mode'] = 'paint'
 
@@ -609,15 +611,20 @@ def get_image(view, layer):
             ax.imshow(ma.masked_where(seg==0, seg), cmap='Reds', alpha=0.8, aspect='auto', interpolation="nearest")
         except: pass
         
-    # 3. OVERLAY SEGMENTACIÓN MANUAL (Lógica Ivan - SE MANTIENE)
-    if user_data.get('segmentation_mask') is not None:
+    # 3. OVERLAY SEGMENTACIONES MÚLTIPLES
+    for seg_entry in user_data.get('segmentations', {}).values():
+        if not seg_entry.get('visible', True):
+            continue
         try:
-            mask = user_data['segmentation_mask']
-            if v_lower == 'axial': seg = mask[layer, :, :]
-            elif v_lower in ['sagital', 'sagittal']: seg = mask[:, :, layer]
-            elif v_lower == 'coronal': seg = mask[:, layer, :]
-            ax.imshow(ma.masked_where(seg==0, seg), cmap='Greens', alpha=0.6, aspect='auto', interpolation='nearest')
-        except: pass
+            seg_mask = seg_entry['mask']
+            if v_lower == 'axial': seg = seg_mask[layer, :, :]
+            elif v_lower in ['sagital', 'sagittal']: seg = seg_mask[:, :, layer]
+            elif v_lower == 'coronal': seg = seg_mask[:, layer, :]
+            else: continue
+            seg_cmap = LinearSegmentedColormap.from_list(f"seg_{id(seg_entry)}", ['#000000', seg_entry['color']])
+            ax.imshow(ma.masked_where(seg==0, seg), cmap=seg_cmap, vmin=0, vmax=255, alpha=0.6, aspect='auto', interpolation='nearest')
+        except:
+            pass
 
     buf = BytesIO()
     fig.savefig(buf, format='png', transparent=True, pad_inches=0)
@@ -686,6 +693,10 @@ def hu_value():
 def paint_voxel():
     """Paints or erases voxels in the segmentation mask."""
     user_data = get_user_data()
+    active_id = user_data.get('active_segmentation_id')
+    if active_id is None or active_id not in user_data.get('segmentations', {}):
+        return jsonify({"status": "error", "message": "No hay segmentación activa"}), 400
+    seg_data = user_data['segmentations'][active_id]
 
     # Extract parameters from JSON request
     data = request.json
@@ -696,8 +707,8 @@ def paint_voxel():
     brush_size = data.get('brush_size', 1)
     mode = data.get('mode', 'paint')
 
-    # Validate segmentation mask exists
-    seg_mask = user_data.get('segmentation_mask')
+    # Get segmentation mask from active segmentation
+    seg_mask = seg_data['mask']
     if seg_mask is None:
         return jsonify({"status": "error", "message": "Segmentation mask not initialized"}), 500
 
@@ -765,6 +776,10 @@ def fill_polygon():
         return jsonify({"status": "error", "message": "scikit-image not installed"}), 500
 
     user_data = get_user_data()
+    active_id = user_data.get('active_segmentation_id')
+    if active_id is None or active_id not in user_data.get('segmentations', {}):
+        return jsonify({"status": "error", "message": "No hay segmentación activa"}), 400
+    seg_data = user_data['segmentations'][active_id]
 
     # Extract parameters from JSON request
     data = request.json
@@ -777,7 +792,7 @@ def fill_polygon():
     if not vertices or len(vertices) < 3:
         return jsonify({"status": "error", "message": "At least 3 vertices required"}), 400
 
-    seg_mask = user_data.get('segmentation_mask')
+    seg_mask = seg_data['mask']
     if seg_mask is None:
         return jsonify({"status": "error", "message": "Segmentation mask not initialized"}), 500
 
@@ -807,6 +822,16 @@ def fill_polygon():
         paint_value = 0
     else:
         return jsonify({"status": "error", "message": "Invalid mode"}), 400
+
+    # --- STORE OPERATION FOR UNDO (before modifying mask) ---
+    # Store a snapshot of the mask before this operation
+    seg_data['last_polygon_operation'] = {
+        'view': view,
+        'layer': layer,
+        'vertices': vertices,
+        'mode': mode,
+        'mask_before': seg_mask.copy()  # Full snapshot for 1-level undo
+    }
 
     # Convert to voxel coordinates and fill based on view
     try:
@@ -863,26 +888,165 @@ def fill_polygon():
     except Exception as e:
         return jsonify({"status": "error", "message": f"Fill failed: {str(e)}"}), 500
 
+@app.route("/undo_last_polygon", methods=["POST"])
+def undo_last_polygon():
+    """Undoes the last polygon operation by restoring the mask snapshot."""
+    user_data = get_user_data()
+    active_id = user_data.get('active_segmentation_id')
+    if active_id is None or active_id not in user_data.get('segmentations', {}):
+        return jsonify({"status": "error", "message": "No hay segmentación activa"}), 400
+    seg_data = user_data['segmentations'][active_id]
+
+    last_op = seg_data.get('last_polygon_operation')
+
+    if last_op is None:
+        return jsonify({"status": "error", "message": "No operation to undo"}), 400
+
+    seg_mask = seg_data['mask']
+    if seg_mask is None:
+        return jsonify({"status": "error", "message": "No segmentation mask found"}), 400
+
+    try:
+        # Restore mask to state before last polygon
+        mask_before = last_op.get('mask_before')
+        if mask_before is not None:
+            # Copy the snapshot back to the active mask
+            np.copyto(seg_mask, mask_before)
+
+            # Clear the last operation (can only undo once)
+            seg_data['last_polygon_operation'] = None
+
+            return jsonify({"status": "success", "message": "Last polygon undone"})
+        else:
+            return jsonify({"status": "error", "message": "Snapshot not found"}), 500
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Undo failed: {str(e)}"}), 500
+
 @app.route("/clear_segmentation", methods=["POST"])
 def clear_segmentation():
-    """Clears the segmentation mask by filling it with zeros."""
+    """Clears the active segmentation mask by filling it with zeros."""
     user_data = get_user_data()
-    seg_mask = user_data.get('segmentation_mask')
+    active_id = user_data.get('active_segmentation_id')
+    if active_id is None or active_id not in user_data.get('segmentations', {}):
+        return jsonify({"status": "error", "message": "No hay segmentación activa"}), 400
+    seg_data = user_data['segmentations'][active_id]
+
+    seg_mask = seg_data['mask']
 
     if seg_mask is not None:
         seg_mask.fill(0)
+        # Clear undo history when clearing
+        seg_data['last_polygon_operation'] = None
         return jsonify({"status": "success", "message": "Segmentation cleared"})
 
     return jsonify({"status": "error", "message": "No segmentation mask found"}), 400
 
+@app.route("/get_segmentations")
+def get_segmentations():
+    user_data = get_user_data()
+    segs = user_data.get('segmentations', {})
+    if not segs:
+        return jsonify({"segmentations": [], "active_id": None})
+    seg_list = [
+        {
+            "id": sid,
+            "name": s['name'],
+            "color": s['color'],
+            "visible": s['visible'],
+            "has_undo": s['last_polygon_operation'] is not None
+        }
+        for sid, s in segs.items()
+    ]
+    return jsonify({"segmentations": seg_list, "active_id": user_data.get('active_segmentation_id')})
+
+
+@app.route("/create_segmentation", methods=["POST"])
+def create_segmentation():
+    user_data = get_user_data()
+    name = (request.json or {}).get('name', '')
+    if not name.strip():
+        return jsonify({"status": "error", "message": "El nombre no puede estar vacío"}), 400
+    segs = user_data.get('segmentations', {})
+    if len(segs) >= 5:
+        return jsonify({"status": "error", "message": "Máximo 5 segmentaciones permitidas"}), 400
+    # Find lowest unused ID in 0-4
+    new_id = next(i for i in range(5) if i not in segs)
+    color = SEGMENTATION_COLORS[new_id]
+    dims = user_data.get('dims', (1, 1, 1))
+    segs[new_id] = {
+        'name': name.strip(),
+        'mask': np.zeros(dims, dtype=np.uint8),
+        'color': color,
+        'visible': True,
+        'last_polygon_operation': None
+    }
+    user_data['active_segmentation_id'] = new_id
+    seg_list = [
+        {
+            "id": sid,
+            "name": s['name'],
+            "color": s['color'],
+            "visible": s['visible'],
+            "has_undo": s['last_polygon_operation'] is not None
+        }
+        for sid, s in segs.items()
+    ]
+    return jsonify({
+        "status": "success",
+        "id": new_id,
+        "name": name.strip(),
+        "color": color,
+        "segmentations": seg_list,
+        "active_id": new_id
+    })
+
+
+@app.route("/delete_segmentation", methods=["POST"])
+def delete_segmentation():
+    user_data = get_user_data()
+    seg_id = (request.json or {}).get('id')
+    segs = user_data.get('segmentations', {})
+    if seg_id not in segs:
+        return jsonify({"status": "error", "message": "Segmentación no encontrada"}), 400
+    del segs[seg_id]
+    if not segs:
+        user_data['active_segmentation_id'] = None
+    else:
+        user_data['active_segmentation_id'] = min(segs.keys())
+    return jsonify({"status": "success", "new_active_id": user_data['active_segmentation_id']})
+
+
+@app.route("/set_active_segmentation", methods=["POST"])
+def set_active_segmentation():
+    user_data = get_user_data()
+    seg_id = (request.json or {}).get('id')
+    segs = user_data.get('segmentations', {})
+    if seg_id not in segs:
+        return jsonify({"status": "error", "message": "Segmentación no encontrada"}), 400
+    user_data['active_segmentation_id'] = seg_id
+    has_undo = segs[seg_id]['last_polygon_operation'] is not None
+    return jsonify({"status": "success", "id": seg_id, "has_undo": has_undo})
+
+
+@app.route("/toggle_segmentation_visibility", methods=["POST"])
+def toggle_segmentation_visibility():
+    user_data = get_user_data()
+    seg_id = (request.json or {}).get('id')
+    segs = user_data.get('segmentations', {})
+    if seg_id not in segs:
+        return jsonify({"status": "error", "message": "Segmentación no encontrada"}), 400
+    segs[seg_id]['visible'] = not segs[seg_id]['visible']
+    return jsonify({"status": "success", "id": seg_id, "visible": segs[seg_id]['visible']})
+
+
 @app.route("/export_segmentation", methods=["POST"])
 def export_segmentation():
-    """Exports the segmentation mask as an NRRD file."""
+    """Exports one or all segmentation masks as NRRD file(s)."""
     user_data = get_user_data()
-    seg_mask = user_data.get('segmentation_mask')
-
-    if seg_mask is None or seg_mask.sum() == 0:
-        return jsonify({"status": "error", "message": "No segmentation to export"}), 400
+    active_id = user_data.get('active_segmentation_id')
+    segs = user_data.get('segmentations', {})
+    mode = (request.json or {}).get('mode', 'active') if request.json else 'active'
 
     try:
         # Get spacing information
@@ -891,27 +1055,42 @@ def export_segmentation():
 
         # Get origin information
         grid_full = user_data.get('grid_full')
-        if grid_full is not None:
-            origin = grid_full.origin
+        origin = grid_full.origin if grid_full is not None else [0, 0, 0]
+
+        def make_header():
+            return {
+                'space': 'left-posterior-superior',
+                'kinds': ['domain', 'domain', 'domain'],
+                'space directions': [[dz, 0, 0], [0, dy, 0], [0, 0, dx]],
+                'space origin': origin
+            }
+
+        if mode == 'all':
+            if not segs:
+                return jsonify({"status": "error", "message": "No hay segmentaciones para exportar"}), 400
+            with tempfile.TemporaryDirectory() as tmpdir:
+                for seg in segs.values():
+                    safe_name = seg['name'].replace('/', '_').replace('\\', '_')
+                    filepath = os.path.join(tmpdir, f"{safe_name}.nrrd")
+                    nrrd.write(filepath, seg['mask'], make_header())
+                zip_path = os.path.join(ANONIMIZADO_FOLDER, 'segmentaciones.zip')
+                with zipfile.ZipFile(zip_path, 'w') as zipf:
+                    for seg in segs.values():
+                        safe_name = seg['name'].replace('/', '_').replace('\\', '_')
+                        filepath = os.path.join(tmpdir, f"{safe_name}.nrrd")
+                        zipf.write(filepath, f"{safe_name}.nrrd")
+                return send_file(zip_path, as_attachment=True, download_name='segmentaciones.zip')
         else:
-            origin = [0, 0, 0]
-
-        # Create NRRD header
-        header = {
-            'space': 'left-posterior-superior',
-            'kinds': ['domain', 'domain', 'domain'],
-            'space directions': [[dz, 0, 0], [0, dy, 0], [0, 0, dx]],
-            'space origin': origin
-        }
-
-        # Create temporary file path
-        filepath = os.path.join(ANONIMIZADO_FOLDER, 'segmentation.nrrd')
-
-        # Write NRRD file
-        nrrd.write(filepath, seg_mask, header)
-
-        # Return file for download
-        return send_file(filepath, as_attachment=True, download_name='segmentation.nrrd')
+            # Active mode
+            if active_id is None or active_id not in segs:
+                return jsonify({"status": "error", "message": "No hay segmentación activa"}), 400
+            seg_data = segs[active_id]
+            seg_mask = seg_data['mask']
+            seg_name = seg_data['name']
+            safe_name = seg_name.replace('/', '_').replace('\\', '_')
+            filepath = os.path.join(ANONIMIZADO_FOLDER, f"{safe_name}.nrrd")
+            nrrd.write(filepath, seg_mask, make_header())
+            return send_file(filepath, as_attachment=True, download_name=f"{safe_name}.nrrd")
 
     except Exception as e:
         return jsonify({"status": "error", "message": f"Export failed: {str(e)}"}), 500
