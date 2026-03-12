@@ -18,6 +18,8 @@ from io import BytesIO
 
 # Librerías para procesamiento científico y de imágenes
 import numpy as np
+import time
+import shutil
 import nibabel as nib
 from scipy.ndimage import zoom
 import subprocess
@@ -192,9 +194,12 @@ def update_3d_render(user_data, mode):
     if 'RT' in user_data and 'RT_aligned' in user_data:
         add_RT_to_plotter(user_data)
         
-    # Re-dibujar Segmentación (IA o manual) si tiene contenido <---
-    if 'segmentation_mask' in user_data and np.any(user_data['segmentation_mask']):
-        add_segmentation_to_plotter(user_data)
+    # Re-dibujar Segmentación desde el sistema Multicapa
+    active_id = user_data.get('active_segmentation_id')
+    if active_id and 'segmentations' in user_data and active_id in user_data['segmentations']:
+        seg_mask = user_data['segmentations'][active_id]['mask']
+        if seg_mask is not None and np.any(seg_mask):
+            add_segmentation_to_plotter(user_data)
 
     plotter.view_isometric()
     panel_vtk.param.trigger('object')
@@ -261,7 +266,10 @@ def add_segmentation_to_plotter(user_data):
     plotter = user_data.get('vtk_plotter')
     panel_vtk = user_data.get('vtk_panel')
     grid_full = user_data.get('grid_full')
-    seg_mask = user_data.get('segmentation_mask')
+    seg_mask = None
+    active_id = user_data.get('active_segmentation_id')
+    if active_id and 'segmentations' in user_data and active_id in user_data['segmentations']:
+        seg_mask = user_data['segmentations'][active_id]['mask']
 
     if not all([plotter, panel_vtk, grid_full is not None, seg_mask is not None]):
         return False
@@ -1266,10 +1274,54 @@ def ejecutar_ia_swin(dicom_input_path, output_folder):
         print("STDERR:", proceso.stderr)
         return {"status": "error", "message": "Fallo al ejecutar el modelo de IA. Revisa la consola."}
 
+def normalize_ai_mask(mask_data, user_data, z_inverted=False):
+    """
+    Convierte una máscara del modelo IA al formato exacto del visor (Z,Y,X).
+    Blindada contra inversiones anatómicas y rotaciones de 90 grados.
+    """
+    from scipy.ndimage import zoom
+    import numpy as np
+
+    vol = user_data.get("volume_raw")
+    if vol is None:
+        raise ValueError("No hay un volumen base cargado en el visor.")
+
+    Z, Y, X = vol.shape
+    mask = np.array(mask_data)
+
+    # 1. Eliminar batch o canal extra si el modelo lo exportó (ej. [1, Z, Y, X])
+    if mask.ndim == 4:
+        mask = mask[0]
+
+    # 2. SEGURO BIOMÉDICO: Invertir el eje Z si el NIfTI va en contra del DICOM
+    if z_inverted:
+        print("Inversión de Eje Z detectada. Corrigiendo...")
+        mask = mask[::-1, :, :]
+
+    # 3. Transposición de la librería externa (nibabel lee X,Y,Z por defecto)
+    if mask.shape == (X, Y, Z):
+        mask = np.transpose(mask, (2, 1, 0))
+    elif mask.shape == (Y, X, Z):
+        mask = np.transpose(mask, (2, 0, 1))
+    elif mask.shape == (Z, X, Y):
+        mask = np.transpose(mask, (0, 2, 1))
+
+    # 4. Reescalado forzado por fuerza bruta (Zoom Nearest Neighbor)
+    if mask.shape != (Z, Y, X):
+        print(f"Forzando reescalado de máscara: {mask.shape} -> {(Z, Y, X)}")
+        zoom_factors = (Z / mask.shape[0], Y / mask.shape[1], X / mask.shape[2])
+        mask = zoom(mask, zoom_factors, order=0)
+
+    # 5. Binarización estricta (Solo tumor visible al 100%)
+    mask = (mask > 0).astype(np.uint8) * 255
+
+    print("VOL SHAPE (Lienzo):", vol.shape)
+    print("MASK SHAPE (Final):", mask.shape)
+
+    return mask
 
 @app.route('/api/run_ai_segmentation', methods=['POST'])
 def api_run_ai_segmentation():
-    """Endpoint que recibe la orden desde viewer.js"""
     user_data = get_user_data()
     unique_id = user_data.get('unique_id')
     
@@ -1280,72 +1332,95 @@ def api_run_ai_segmentation():
     if not rutas:
         return jsonify({"status": "error", "message": "No se encontraron los archivos DICOM físicos."})
         
-    # FORZAMOS LA RUTA ABSOLUTA PARA EL DICOM
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    dicom_input_path = os.path.abspath(os.path.join(base_dir, rutas[0]))
-    
     out_dir = os.path.abspath(os.path.join(base_dir, 'anonimizado', 'AI_RESULTS'))
     os.makedirs(out_dir, exist_ok=True)
     
-    # 1. Llamar a la red neuronal
+    # Aislamiento de serie DICOM
+    import shutil
+    temp_dicom_dir = os.path.join(out_dir, f"temp_dicom_{unique_id}")
+    os.makedirs(temp_dicom_dir, exist_ok=True)
+    
+    for f in os.listdir(temp_dicom_dir):
+        os.remove(os.path.join(temp_dicom_dir, f))
+        
+    for ruta_relativa in rutas:
+        src_path = os.path.abspath(os.path.join(base_dir, ruta_relativa))
+        if os.path.exists(src_path):
+            shutil.copy(src_path, temp_dicom_dir)
+            
+    dicom_input_path = temp_dicom_dir
+    
+    # Ejecución del microservicio
     resultado = ejecutar_ia_swin(dicom_input_path, out_dir)
     
     if resultado.get("status") == "success":
         mask_path = resultado.get("mask_path")
         
         try:
-            # 2. Cargar el resultado (.nii.gz)
-            nifti_img = nib.load(mask_path)
-            mask_data = nifti_img.get_fdata()
+            import time
+            import SimpleITK as sitk
+            import pydicom
+            import numpy as np
             
-            # Transponer a (Z, Y, X)
-            if mask_data.ndim == 3:
-                mask_data = np.transpose(mask_data, (2, 1, 0))
+            # 1. LEER LA MÁSCARA ALINEADA
+            # SITK devuelve directamente el formato nativo (Z, Y, X) sin rotaciones raras
+            mask_sitk = sitk.ReadImage(mask_path)
+            mask_data = sitk.GetArrayFromImage(mask_sitk)
             
-            # 3. ALINEACIÓN ESPACIAL PERFECTA (Revertir el recorte del modelo)
-            target_shape = user_data['dims'] 
-            if mask_data.shape != target_shape:
-                print(f"Centrando máscara IA de {mask_data.shape} a original {target_shape}...")
-                aligned_mask = np.zeros(target_shape, dtype=mask_data.dtype)
+            # 2. SINCRONIZACIÓN DEL EJE Z (El anti-código de barras)
+            # Detectamos cómo ordenó tu Flask las imágenes (InstanceNumber)
+            viewer_files = [os.path.abspath(os.path.join(base_dir, r)) for r in rutas]
+            viewer_files_sorted = sorted(viewer_files, key=lambda f: int(pydicom.dcmread(f, stop_before_pixels=True).InstanceNumber))
+            
+            z_start_flask = float(pydicom.dcmread(viewer_files_sorted[0], stop_before_pixels=True).ImagePositionPatient[2])
+            z_end_flask = float(pydicom.dcmread(viewer_files_sorted[-1], stop_before_pixels=True).ImagePositionPatient[2])
+            flask_z_dir = z_end_flask - z_start_flask
+            
+            # Detectamos cómo ordenó SimpleITK las imágenes (Físicamente)
+            reader = sitk.ImageSeriesReader()
+            sitk_files = reader.GetGDCMSeriesFileNames(dicom_input_path)
+            z_start_sitk = float(pydicom.dcmread(sitk_files[0], stop_before_pixels=True).ImagePositionPatient[2])
+            z_end_sitk = float(pydicom.dcmread(sitk_files[-1], stop_before_pixels=True).ImagePositionPatient[2])
+            sitk_z_dir = z_end_sitk - z_start_sitk
+            
+            # Si pydicom ordenó al revés que las coordenadas físicas, empatamos las matrices
+            if (flask_z_dir * sitk_z_dir) < 0:
+                mask_data = mask_data[::-1, :, :]
                 
-                idx_m, idx_t = [], []
-                # Esta matemática detecta si la IA recortó o rellenó los bordes,
-                # y vuelve a colocar la máscara exactamente en el centro real del paciente.
-                for m_dim, t_dim in zip(mask_data.shape, target_shape):
-                    if m_dim > t_dim:
-                        start = (m_dim - t_dim) // 2
-                        idx_m.append(slice(start, start + t_dim))
-                        idx_t.append(slice(None))
-                    else:
-                        start = (t_dim - m_dim) // 2
-                        idx_m.append(slice(None))
-                        idx_t.append(slice(start, start + m_dim))
-                        
-                aligned_mask[tuple(idx_t)] = mask_data[tuple(idx_m)]
-                mask_data = aligned_mask
-            
-            # 4. FILTRAR LA LESIÓN
-            # La IA devuelve valores (0, 1, 2...). Nos quedamos con el valor más alto (la estructura principal)
+            # 3. SEGURO DIMENSIONAL FINAL (Zoom escalar)
+            target_shape = user_data['dims']
+            if mask_data.shape != target_shape:
+                from scipy.ndimage import zoom
+                zoom_factors = [t/m for t, m in zip(target_shape, mask_data.shape)]
+                mask_data = zoom(mask_data, zoom_factors, order=0)
+                
+            # 4. INYECCIÓN
             max_class = np.max(mask_data)
             if max_class > 0:
-                print(f"Se detectó estructura de clase {max_class}. Pintando en visor...")
-                # Convertimos a 255 para que el pincel Cyan del visor lo dibuje bien
                 mask_data = np.where(mask_data == max_class, 255, 0).astype(np.uint8)
             else:
-                print("La IA no detectó ninguna anomalía/estructura en este estudio.")
                 mask_data = np.zeros(target_shape, dtype=np.uint8)
+                
+            if 'segmentations' not in user_data:
+                user_data['segmentations'] = {}
+                
+            ai_seg_id = f"ai_swin_{int(time.time())}"
+            user_data['segmentations'][ai_seg_id] = {
+                'id': ai_seg_id,
+                'name': 'Segmentación IA',
+                'mask': mask_data,
+                'color': '#00FFFF',
+                'visible': True
+            }
+            user_data['active_segmentation_id'] = ai_seg_id
             
-            # 5. Inyectar al lienzo interactivo
-            user_data['segmentation_mask'] = mask_data
-            user_data['segmentation_active'] = True
-            
-            print(f"\n[ÉXITO] IA finalizada. Resultado en pantalla.")
+            print(f"\n[ÉXITO] Matriz normalizada y proyectada perfectamente sin usar TorchIO Inverse.")
             return jsonify({"status": "success"})
             
         except Exception as e:
-            print(f"Error procesando la máscara final: {e}")
-            return jsonify({"status": "error", "message": "La IA terminó, pero hubo un error al alinear la imagen."})
-            
+            print(f"Error crítico en inyección: {str(e)}")
+            return jsonify({"status": "error", "message": f"Error de inyección: {e}"})
     else:
         return jsonify({"status": "error", "message": resultado.get("message", "Error desconocido")})
 
