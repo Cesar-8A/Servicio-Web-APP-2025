@@ -1,10 +1,9 @@
 # --- 1. IMPORTACIONES DE LIBRERÍAS ---
 # Flask y extensiones para la aplicación web y formularios
-from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file
+from flask import render_template, request, redirect, url_for, jsonify, send_file
 from flask import session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_wtf import FlaskForm, CSRFProtect
-from flask_wtf.csrf import generate_csrf
+from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField
 from wtforms.validators import InputRequired, Length, EqualTo
 
@@ -37,18 +36,18 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.colors import LinearSegmentedColormap
 
-# --- CONFIGURACIÓN INICIAL DE PYVISTA ---
-pv.OFF_SCREEN = True # Asegura que PyVista no intente crear ventanas visibles
-pv.global_theme.jupyter_backend = 'static' # Usa un motor gráfico que no depende de la pantalla
+# --- 2. APLICACIÓN FLASK (Application Factory) ---
+from app import create_app
 
-# --- 2. CONFIGURACIÓN DE LA APLICACIÓN FLASK ---
-app = Flask(__name__)
+app = create_app()
 
-# Claves secretas para seguridad de la sesión y formularios
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(24))
-app.config['WTF_CSRF_ENABLED'] = True
-app.config['WTF_CSRF_SECRET_KEY'] = os.environ.get("WTF_CSRF_SECRET_KEY", app.secret_key)
-csrf = CSRFProtect(app)
+# Exponemos las constantes de configuración como variables de módulo para que
+# todas las rutas de este archivo sigan funcionando sin cambios durante la
+# modularización progresiva. Se eliminarán cuando cada módulo se extraiga.
+UPLOAD_FOLDER = app.config['UPLOAD_FOLDER']
+UPLOAD_FOLDER_NRRD = app.config['UPLOAD_FOLDER_NRRD']
+ANONIMIZADO_FOLDER = app.config['ANONIMIZADO_FOLDER']
+SEGMENTATION_COLORS = app.config['SEGMENTATION_COLORS']
 
 # --- 3. SISTEMA DE SESIÓN PARA MÚLTIPLES USUARIOS ---
 
@@ -68,30 +67,7 @@ def get_user_data():
     # setdefault asegura que si el user_id se perdió por alguna razón, se cree un dict vacío
     return SERVER_SIDE_SESSION_STORE.setdefault(user_id, {})
 
-# --- 4. CONFIGURACIÓN Y VARIABLES GLOBALES DE LA APP ---
-
-# Inyecta variables globales en todas las plantillas HTML para saber si el usuario está logueado
-@app.context_processor
-def inject_user_and_csrf():
-    return {
-        'user_logged_in': session.get('user_logged_in', False),
-        'user_initials': session.get('user_initials', ''),
-        'csrf_token': generate_csrf
-    }
-
-# Definición de carpetas para almacenar archivos subidos
-UPLOAD_FOLDER = 'uploads'
-UPLOAD_FOLDER_NRRD = 'upload_nrrd'
-ANONIMIZADO_FOLDER = os.path.join(os.getcwd(), 'anonimizado')
-# Crea las carpetas si no existen al iniciar la aplicación
-for folder in [UPLOAD_FOLDER, UPLOAD_FOLDER_NRRD, ANONIMIZADO_FOLDER]:
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-
-SEGMENTATION_COLORS = ['#00FFFF', '#ADFF2F', '#FF8C00', '#FF00FF', '#FFD700']
-
-# Inicialización de Panel y Bokeh para la vista 3D
-pn.extension('vtk')
+# --- 4. VARIABLES GLOBALES DE RENDERING (Bokeh) ---
 bokeh_server_started = False
 def start_bokeh_server(panel_layout):
     """Inicia el servidor de Bokeh en un hilo separado si aún no se ha iniciado."""

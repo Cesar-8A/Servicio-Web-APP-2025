@@ -19,6 +19,8 @@
 9. [Session Management](#session-management)
 10. [File Structure](#file-structure)
 11. [Recent Architecture Changes & Fixes (2025-11-30)](#11-recent-architecture-changes--fixes)
+12. [Multi-Segmentation System](#12-multi-segmentation-system)
+13. [AI Segmentation Plugin — Swin-UNETR](#13-ai-segmentation-plugin--swin-unetr)
 
 ---
 
@@ -173,6 +175,28 @@ user_data = {
     'RT': np.ndarray,                    # Raw NRRD data
     'RT_header': dict,                   # NRRD metadata
     'RT_aligned': np.ndarray,            # Transformed RT for 2D overlay
+
+    # --- Manual / AI Segmentation System ---
+    'segmentations': {
+        0: {
+            'name': str,                 # User-defined label
+            'mask': np.ndarray,          # uint8 volume (Z, Y, X) — 0 or 255
+            'color': str,                # Hex color e.g. '#00FFFF'
+            'visible': bool,
+            'last_polygon_operation': {  # Snapshot for 1-level undo (or None)
+                'view': str,
+                'layer': int,
+                'vertices': list,
+                'mode': str,
+                'mask_before': np.ndarray  # Full mask copy before the operation
+            }
+        },
+        # Keys are integers 0–4 (max 5 concurrent segmentations)
+    },
+    'active_segmentation_id': int | str | None,  # int (manual) or str "ai_swin_<ts>"
+    'brush_size': int,                   # Brush radius in voxels (default 1)
+    'paint_mode': str,                   # 'paint' | 'erase'
+    'current_cmap': str,                 # Active colormap for 2D/3D (default 'bone')
 }
 ```
 
@@ -410,16 +434,35 @@ POST /exportar_dicom
 | Method | Route | Purpose | Returns |
 |--------|-------|---------|---------|
 | GET | `/image/<view>/<layer>` | Get 2D slice PNG | image/png |
-| | | Query params: `ww`, `wc` | |
+| | | Query params: `ww`, `wc`, `cmap` | |
 
 ### Interactive Tools Routes
 | Method | Route | Purpose | Returns |
 |--------|-------|---------|---------|
-| GET | `/hu_value` | Get HU value at (x,y,z) | JSON: {voxel, hu} |
-| GET | `/get_histogram` | Get volume histogram | JSON: {counts, bin_edges} |
+| GET | `/hu_value` | Get HU value at (x,y,z) | JSON: {voxel, hu, scales} |
+| GET | `/get_histogram` | Get volume histogram | JSON: {counts, bin_edges, segments} |
 | GET | `/get_dicom_metadata` | Get technical metadata | JSON |
-| POST | `/update_render_mode` | Change 3D rendering | JSON status |
-| POST | `/upload_RT` | Upload RT Structure | JSON status |
+| POST | `/update_render_mode` | Change 3D render mode and colormap | JSON status |
+| POST | `/upload_RT` | Upload RT Structure (.nrrd) | JSON status |
+
+### Multi-Segmentation Routes
+| Method | Route | Purpose | Returns |
+|--------|-------|---------|---------|
+| GET | `/get_segmentations` | List all segmentations + active ID | JSON |
+| POST | `/create_segmentation` | Create new segmentation layer | JSON: {id, name, color, segmentations, active_id} |
+| POST | `/delete_segmentation` | Delete segmentation by ID | JSON: {new_active_id} |
+| POST | `/set_active_segmentation` | Switch active segmentation | JSON: {id, has_undo} |
+| POST | `/toggle_segmentation_visibility` | Show/hide a segmentation | JSON: {id, visible} |
+| POST | `/paint_voxel` | Paint/erase voxels with brush | JSON status |
+| POST | `/fill_polygon` | Fill closed polygon region | JSON status |
+| POST | `/undo_last_polygon` | Restore mask to pre-polygon state | JSON status |
+| POST | `/clear_segmentation` | Zero-out active mask | JSON status |
+| POST | `/export_segmentation` | Export active or all masks as NRRD | NRRD or ZIP |
+
+### AI Segmentation Routes
+| Method | Route | Purpose | Returns |
+|--------|-------|---------|---------|
+| POST | `/api/run_ai_segmentation` | Run Swin-UNETR inference | JSON: {status} |
 
 ### Anonymization Routes
 | Method | Route | Purpose | Returns |
@@ -436,81 +479,132 @@ POST /exportar_dicom
 ```
 render.html
   ├── Sidebar (#plugins-sidebar)
-  │   ├── Tool Buttons (HU, Inspector, Window/Level, RT, Histogram)
-  │   ├── 3D Mode Selector (Isosurface/MIP/Volume)
-  │   └── Active Tool Panels (dynamic)
+  │   ├── Tool Buttons (Inspector, Window/Level, RT Struct, Histogram, Segmentation, AI)
+  │   ├── 3D Mode Selector (Isosurface / MIP / MIP Inverted / Volume)
+  │   ├── Colormap Dropdown (#colormapSelect) — affects 2D and 3D simultaneously
+  │   └── Active Tool Panels (dynamic, shown/hidden per active button)
+  │       ├── Window/Level Panel: sliders + spinners + presets
+  │       ├── Contrast Editor Panel: histogram canvas + curve canvas
+  │       ├── RT Struct Panel: NRRD upload form
+  │       ├── Segmentation Panel: layer list, brush/polygon tool, export buttons
+  │       └── AI Plugin Panel: Auto-Segmentar button (Swin-UNETR)
   │
   └── Quadrant Grid (#quadrant-grid)
-      ├── Axial View (Canvas + Overlay)
-      ├── Sagittal View (Canvas + Overlay)
-      ├── Coronal View (Canvas + Overlay)
-      └── 3D View (iframe → Bokeh server)
+      ├── Axial View
+      │   ├── canvas#canvas_axial (image + LUT)
+      │   ├── canvas#overlay_axial (crosshair / polygon preview)
+      │   └── minimap#minimap_container_axial (visible only at zoom > 1.1×)
+      ├── Sagital View  (same structure as Axial)
+      ├── Coronal View  (same structure as Axial)
+      └── 3D View (iframe#DicomRender → Bokeh server port 5010)
 ```
 
 ### JavaScript State Management (viewer.js)
 ```javascript
 // Global State Objects
+
 viewState = {
-    ww: 400,              // Window width
-    wc: 40,               // Window center
-    baseImages: {},       // Cached images per view
-    huMode: false,        // HU picker active
-    inspectorMode: false  // 3D inspector active
+    ww: 400,                          // Window width (HU)
+    wc: 40,                           // Window center (HU)
+    baseImages: {},                   // Cached Image objects per view
+    inspectorMode: false,             // 3D Inspector active
+    segmentationMode: false,          // Segmentation tool active
+    brushSize: 1,                     // Brush radius in voxels
+    paintMode: 'paint',               // 'paint' | 'erase'
+    segmentationTool: 'brush',        // 'brush' | 'polygon'
+    colormap: 'gray',                 // Active colormap (e.g. 'gray','bone','hot')
+    scales: { axial, coronal, sagittal }, // Aspect-ratio factors from backend
+    lastVoxel: { x, y, z },           // Last clicked voxel (for crosshair persistence)
+    activeSegmentationId: null,       // int or "ai_swin_<ts>"
+    segmentations: []                 // Mirror of backend list
 }
 
+polygonState = {
+    vertices: [],       // [{x, y}] in internal pixel coordinates
+    isDrawing: false,
+    currentView: null,  // 'axial' | 'sagital' | 'coronal'
+    currentLayer: null, // Slice index
+    lastOperation: null // For 1-level undo
+}
+
+segUndoState = {}  // { segmentationId: bool } — tracks undo availability per layer
+
 zoomState = {
-    axial: { scale, panX, panY, isDragging },
-    sagital: { ... },
-    coronal: { ... }
+    axial:   { scale: 1, panX: 0, panY: 0, isDragging: false },
+    sagital: { scale: 1, panX: 0, panY: 0, isDragging: false },
+    coronal: { scale: 1, panX: 0, panY: 0, isDragging: false }
 }
 
 contrastState = {
-    points: [{x, y}, ...],     // Histogram curve control points
-    lut: Uint8ClampedArray,    // Lookup table (256 values)
-    cutoff: 7.0,               // Histogram display cutoff
-    logScale: false,           // Histogram log scale
-    histogramData: null        // Server-fetched histogram
+    points: [{ x: -1024, y: 0 }, { x: 3071, y: 255 }],  // Control points
+    activePointIndex: null,
+    isDragging: false,
+    histogramData: null,  // Server-fetched { counts, bin_edges, segments }
+    cutoff: 7.0,
+    logScale: false,
+    minHU: -1024,
+    maxHU: 3071,
+    lut: Uint8ClampedArray(256)  // Lookup table applied to grayscale pixels
 }
 ```
 
 ### Key Frontend Features
 
 **1. Tool Activation System**
-- Each tool button toggles visual state (`.btn-udg-rojo` class)
-- Opens corresponding panel in sidebar
-- Mutually exclusive modes (HU vs Inspector)
+- Each tool button toggles visual state (`.btn-udg-rojo` class) via `setupPluginButton()`
+- Shows/hides a corresponding panel container
+- Inspector and Segmentation modes are **mutually exclusive** — activating one deactivates the other
+- Segmentation mode changes cursor to crosshair; Inspector to pointer; default is grab
 
 **2. Window/Level Control**
-- Dual input: Sliders + numeric spinners
-- Presets: Lung (-600/1500), Bone (480/2500), Soft Tissue (40/400)
-- Debounced manual input (250ms delay)
-- Instant slider feedback
+- Dual input: range sliders + numeric spinners with `+/-` buttons (step = 10)
+- Presets: Lung (-600 / 1500), Bone (480 / 2500), Soft Tissue (40 / 400)
+- Active preset button is highlighted (`.preset-active` class); any manual change clears highlight
+- Debounced 250ms update from text fields; immediate update from sliders
 
-**3. Zoom & Pan**
-- Mouse wheel zoom (centered on cursor)
-- Click-drag panning
-- Shared transform for Canvas + Overlay
-- Double-click to reset
+**3. Colormap Selector**
+- Dropdown (`#colormapSelect`) sets `viewState.colormap`
+- 2D views reload immediately from server with the new `cmap` query parameter
+- 3D colormap is sent to the server next time render mode changes (via `update_render_mode`)
+- LUT is only applied in the browser when `colormap === 'gray'` (preserves colored medical maps)
 
-**4. Histogram Editor**
-- Draggable control points on curve
-- Linear interpolation for LUT generation
-- Real-time image re-mapping (no server round-trip)
-- Log scale toggle for visualization
+**4. Zoom & Pan**
+- Mouse wheel zoom (cursor-anchored, range 1×–10×)
+- Click-drag panning; disabled while Inspector or Segmentation mode is active
+- Both `canvas_*` and `overlay_*` receive the same CSS transform (`translate + scale`, origin `0 0`)
+- Double-click resets zoom and pan to default
+- **Minimap** (`updateMinimap(view)`): appears as a 120px thumbnail overlay when zoom > 1.1×, with a yellow viewport rectangle. Clicking the minimap repositions the pan.
 
-**5. HU Picker**
-- Converts CSS click coordinates to internal pixel coordinates
-- Accounts for `object-fit: contain` letterboxing
-- Displays voxel (x,y,z) and HU value
-- Draws marker on overlay canvas
+**5. Histogram & Contrast Curve Editor**
+- Two stacked canvases: `histogramCanvas` (bar chart) + `curveCanvas` (transfer function)
+- Histogram colored by HU range: dark gray (air), yellow (fat), red (soft tissue), white (bone)
+- Control points on the curve are draggable (mouse + touch); double-click adds a point
+- Navigation buttons: Prev/Next/Add/Remove point; Reset restores linear 0→255
+- Curve computes and applies a 256-entry LUT client-side (no server round-trip)
+- `ResizeObserver` keeps canvas dimensions in sync with the sidebar panel width
 
 **6. 3D Inspector (Crosshair)**
-- Click or drag on any view
-- Draws crosshair on current view
-- Syncs other views to clicked location:
-  - Axial (x,y) → Sagittal[x], Coronal[y]
-  - Coronal (x,y) → Sagittal[x], Axial[y]
-  - Sagittal (x,y) → Coronal[x], Axial[y]
+- Click or drag on any view to set the 3D intersection point
+- Crosshair drawn at **internal pixel coordinates** on the overlay canvas; CSS transform positions it on screen automatically
+- Backend `/hu_value` returns `{voxel: {x,y,z}, hu, scales}` — voxel coordinates used to sync other views
+- `syncViewsFromVoxel()` updates the two other view sliders and calls `drawCrosshairsOnAllViews()`
+- Crosshair persists across slice changes (redrawn from `viewState.lastVoxel` in `applyLutAndDraw`)
+- Old `syncViews()` is deprecated (did not account for aspect-ratio scaling)
+
+**7. Segmentation Tool**
+- **Brush sub-tool**: radius selectable via radio buttons (1–5 voxels); click sends to `/paint_voxel`
+- **Polygon sub-tool**: click to place vertices; preview line follows mouse; fill sent to `/fill_polygon`
+  - Close polygon: click near first vertex (within 10px), or press **Enter**
+  - Remove last vertex: **Backspace**; cancel all: **Escape**
+  - Polygon color matches the active segmentation color; erase mode shows red
+- **Undo**: 1-level per segmentation (full mask snapshot stored on backend)
+- Max 5 concurrent segmentation layers; each auto-assigned a color from `SEGMENTATION_COLORS`
+- Per-layer visibility toggle; delete; export active (`.nrrd`) or all (`.zip`)
+- AI segmentation result injected as a new layer with id `"ai_swin_<timestamp>"`
+
+**8. Loading Overlays**
+- `showViewLoader(view)` / `hideViewLoader(view)` inject a spinner inside each image wrapper
+- Used during polygon fill (all 3 views) and RT Struct upload
 
 ---
 
@@ -623,11 +717,18 @@ werkzeug==3.0.6           # Security utilities
 ```
 Servicio-Web-APP-2025-2/
 │
-├── main.py                 # Flask application (726 lines)
-│   ├── Routes (17 endpoints)
+├── main.py                 # Flask application (~1430 lines)
+│   ├── Routes (29 endpoints)
 │   ├── DICOM processing functions
 │   ├── 3D rendering logic
+│   ├── Multi-segmentation system
+│   ├── AI plugin orchestration
 │   └── Session management
+│
+├── plugin_ia_swin/         # AI segmentation microservice
+│   ├── run_ai_cli.py       # CLI script — called via subprocess
+│   ├── best_swin_unetr_model.pth  # Trained model weights
+│   └── environment.yml     # Conda env definition (medaimg)
 │
 ├── templates/
 │   ├── home.html           # Base template (navbar, auth, layout)
@@ -643,42 +744,62 @@ Servicio-Web-APP-2025-2/
 │   ├── css/
 │   │   └── udg_estilos.css # Custom styles (UDG branding)
 │   ├── js/
-│   │   └── viewer.js       # Frontend logic (1135 lines)
+│   │   └── viewer.js       # Frontend logic (~2300 lines)
 │   └── img/
 │       ├── udg_logo.png
 │       └── leones_negros_logo.png
 │
-├── uploads/                # DICOM files (343+ test files)
+├── uploads/                # DICOM files (uploaded by users)
 ├── upload_nrrd/            # RT Structure files (*.nrrd)
 ├── anonimizado/            # Temporary export folder
+│   └── AI_RESULTS/         # Swin-UNETR output masks (.nii.gz)
+│       └── temp_dicom_<uid>/   # Isolated DICOM copy for each inference
 │
 ├── requirements.txt        # ~280 dependencies
 ├── README.md               # Basic project description
+├── ARCHITECTURE.md         # This document
 └── .gitignore
 ```
 
 ### Key Code Locations
 
 **DICOM Processing:**
-- `process_dicom_folder()` - main.py:286-326
-- `process_selected_dicom` route - main.py:360-423
+- `process_dicom_folder()` - main.py:343-383
+- `process_selected_dicom` route - main.py:417-486
 
 **3D Rendering:**
-- `create_or_get_plotter()` - main.py:96-145
-- `update_3d_render()` - main.py:147-187
-- `add_RT_to_plotter()` - main.py:189-251
+- `create_or_get_plotter()` - main.py:105-155
+- `update_3d_render()` - main.py:157-206 (modes: isosurface, mip, mip_inverted, volume)
+- `add_RT_to_plotter()` - main.py:208-260
+- `add_segmentation_to_plotter()` - main.py:262-307
 
 **Image Generation:**
-- `get_image()` route - main.py:529-577
-- Window leveling formula - main.py:544-552
+- `get_image()` route - main.py:621-680
+- Window/level + colormap + segmentation overlay rendering - main.py:628-679
+
+**Segmentation Backend:**
+- `paint_voxel` route - main.py:739-815
+- `fill_polygon` route - main.py:817-936
+- `undo_last_polygon` route - main.py:938-971
+- `create_segmentation` route - main.py:1011-1049
+
+**AI Plugin:**
+- `ejecutar_ia_swin()` - main.py:1238-1275 (subprocess orchestration)
+- `normalize_ai_mask()` - main.py:1277-1321 (coordinate alignment)
+- `api_run_ai_segmentation` route - main.py:1323-1425
+- `plugin_ia_swin/run_ai_cli.py` - full inference pipeline
 
 **Frontend Interactivity:**
-- Tool activation - viewer.js:74-139
-- Window/Level controls - viewer.js:142-247
-- Zoom/Pan - viewer.js:819-914
-- Histogram editor - viewer.js:384-573
-- HU Picker - viewer.js:587-724
-- 3D Inspector - viewer.js:917-1117
+- Tool activation (`setupPluginButton`) - viewer.js:92-177
+- Window/Level controls - viewer.js:183-284
+- Colormap selector - viewer.js:873-886
+- Zoom/Pan + Minimap - viewer.js:890-1044
+- 3D Inspector (crosshair) - viewer.js:1047-1275
+- Segmentation management UI - viewer.js:1277-1498
+- Brush/Polygon drawing - viewer.js:1499-2017
+- AI plugin button - viewer.js:2019-2074
+- Minimap (`updateMinimap`) - viewer.js:2230-2279
+- Crosshair persistence (`drawCrosshairFromVoxel`) - viewer.js:2281-2293
 
 ---
 
@@ -1286,29 +1407,313 @@ See [Section 11: Recent Architecture Changes & Fixes](#11-recent-architecture-ch
 
 ---
 
+---
+
+## 12. Multi-Segmentation System
+
+### Overview
+The application supports up to **5 concurrent manual segmentation layers** per user session, plus an unlimited number of AI-generated layers (each time-stamped). All masks are stored as `uint8` NumPy arrays with shape `(Z, Y, X)` containing values `0` (background) or `255` (foreground).
+
+### Backend Data Model
+```python
+user_data['segmentations'] = {
+    0: {
+        'name': 'Tumor',
+        'mask': np.zeros((Z, Y, X), dtype=np.uint8),
+        'color': '#00FFFF',          # From SEGMENTATION_COLORS list
+        'visible': True,
+        'last_polygon_operation': None  # or snapshot dict for undo
+    },
+    # ... up to index 4 for manual layers
+    'ai_swin_1712345678': {          # AI layers use string keys
+        'name': 'Segmentación IA',
+        'mask': np.ndarray,
+        'color': '#00FFFF',
+        'visible': True
+        # Note: AI layers do NOT have last_polygon_operation
+    }
+}
+```
+
+### Color Palette (fixed assignment by slot index)
+```python
+SEGMENTATION_COLORS = ['#00FFFF', '#ADFF2F', '#FF8C00', '#FF00FF', '#FFD700']
+#                       Cyan       Green-Yellow  Orange   Magenta    Gold
+```
+
+### Segmentation Tools
+
+#### Brush Tool
+- Sends pixel coordinates + `brush_size` radius to `/paint_voxel`
+- Backend paints a square kernel of radius `brush_size` around the click
+- Coordinate conversion: same formula as `/hu_value` (scaled by aspect-ratio factors)
+- Supports paint (255) and erase (0) modes
+
+#### Polygon Tool
+- Vertices accumulated client-side in `polygonState.vertices`
+- Preview line drawn from last vertex to mouse cursor (dashed)
+- Fill preview shown when ≥ 3 vertices (translucent color)
+- Closed by: clicking near first vertex (within 10px), pressing Enter, or calling `closeAndFillPolygon()`
+- Sends all vertices + view + layer to `/fill_polygon`
+- Backend uses `skimage.draw.polygon()` to rasterize into the mask
+- Keyboard shortcuts: **ESC** cancel, **Backspace** remove last vertex, **Enter** close and fill
+
+### Undo System
+- 1-level undo per segmentation layer
+- Before each `/fill_polygon` call, backend stores a **full mask copy** (`mask_before`) in `last_polygon_operation`
+- `/undo_last_polygon` uses `np.copyto()` to restore the snapshot
+- Undo state is cleared on: polygon success, segmentation clear, and layer deletion
+- UI: undo button styled orange (`.btn-outline-warning`) when undo is available
+
+### 2D Rendering (Overlay)
+Each segmentation layer is composited as an `imshow` overlay in `get_image()`:
+```python
+for seg_entry in user_data.get('segmentations', {}).values():
+    if not seg_entry.get('visible', True):
+        continue
+    seg_cmap = LinearSegmentedColormap.from_list(
+        f"seg_{id(seg_entry)}", ['#000000', seg_entry['color']]
+    )
+    ax.imshow(ma.masked_where(seg == 0, seg), cmap=seg_cmap,
+              vmin=0, vmax=255, alpha=0.6, aspect='auto', interpolation='nearest')
+```
+
+### 3D Rendering (Segmentation Surface)
+`add_segmentation_to_plotter()` converts the active segmentation mask to a 3D surface:
+- Creates a `pv.ImageData` grid with the same spacing/origin as the main volume
+- Runs `contour([1.0])` to extract the iso-surface
+- Adds as a solid cyan mesh (`opacity=1.0`, `name="ia_segmentation"`)
+- Called from `update_3d_render()` if an active segmentation exists
+
+### Export
+- **Active segmentation**: exported as a single `.nrrd` file with full spatial metadata (spacing, origin, directions)
+- **All segmentations**: exported as a `.zip` containing one `.nrrd` per layer
+- NRRD header includes: `space`, `kinds`, `space directions`, `space origin`
+
+### Complete Segmentation Data Flow
+```
+USER CREATES SEGMENTATION
+         │
+         ▼
+POST /create_segmentation {name}
+         │
+         ├─→ Assign next free slot (0-4)
+         ├─→ Allocate np.zeros(dims, dtype=uint8)
+         └─→ Return {id, name, color}
+
+USER DRAWS WITH BRUSH
+         │
+         ▼
+JavaScript: handleSegmentationClick(view, evt)
+         │
+         ├─→ cssToPngPixels() → {xPix, yPix}
+         │
+         ▼
+POST /paint_voxel {view, xPix, yPix, layer, brush_size, mode}
+         │
+         ├─→ Convert pixel → voxel (same as /hu_value)
+         ├─→ Paint square kernel: seg_mask[z, ny, nx] = 255 or 0
+         └─→ Return success → Frontend reloads image
+
+USER DRAWS POLYGON
+         │
+         ▼
+JavaScript: accumulates polygonState.vertices
+         │
+         ▼
+POST /fill_polygon {view, layer, vertices, mode}
+         │
+         ├─→ Store mask snapshot (last_polygon_operation)
+         ├─→ skimage.draw.polygon() → rr, cc
+         ├─→ seg_mask[layer, rr, cc] = 255 or 0
+         └─→ Return success → Frontend reloads all views
+```
+
+---
+
+## 13. AI Segmentation Plugin — Swin-UNETR
+
+### Architecture Overview
+The AI plugin runs as a **subprocess** in a separate Conda environment, completely isolated from the Flask process to avoid dependency conflicts between medical imaging libraries.
+
+```
+Flask Process (main.py)
+        │
+        │ subprocess.run(["python", "run_ai_cli.py", ...])
+        │ (captures stdout, waits for completion)
+        ▼
+Conda env: medaimg
+        │
+        │ run_ai_cli.py — 5-step pipeline
+        │    │
+        │    ├─ 1. sitk.ImageSeriesReader → read DICOM natively
+        │    ├─ 2. TorchIO preprocessing → resample + crop + normalize
+        │    ├─ 3. SwinUNETR inference → sliding window
+        │    ├─ 4. sitk.ResampleImageFilter → reproject to native space
+        │    └─ 5. sitk.WriteImage → save MASK_FINAL_<ts>.nii.gz
+        │
+        │ Prints single JSON line to stdout:
+        │   {"status":"success","mask_path":"/abs/path/MASK_FINAL.nii.gz"}
+        ▼
+Flask reads JSON, loads mask via SimpleITK, injects into session
+```
+
+### Python Environment
+- **Conda environment name**: `medaimg`
+- **Python executable** (hardcoded): `C:\Users\jesus\anaconda3\envs\medaimg\python.exe`
+- **Key dependencies** (inside medaimg env):
+  - `torch` (CUDA or CPU fallback)
+  - `monai` — SwinUNETR model, `sliding_window_inference`
+  - `torchio` — spatial transforms, intensity normalization
+  - `SimpleITK` — DICOM reading, image resampling
+  - `nibabel` — NIfTI file I/O
+  - Environment defined in `plugin_ia_swin/environment.yml`
+
+### 5-Step Inference Pipeline (`run_ai_cli.py`)
+
+**Step 1 — Native DICOM Read**
+```python
+reader = sitk.ImageSeriesReader()
+dicom_names = reader.GetGDCMSeriesFileNames(dicom_dir)
+reader.SetFileNames(dicom_names)
+native_sitk = reader.Execute()
+sitk.WriteImage(native_sitk, "input_vol_native.nii.gz")
+```
+Preserves original voxel spacing and orientation as reference for reprojection.
+
+**Step 2 — TorchIO Preprocessing**
+```python
+spatial_transform = tio.Compose([
+    tio.Resample(1.0),                    # Isotropic 1mm spacing
+    tio.CropOrPad((160, 192, 160))        # Fixed model input size
+])
+intensity_transform = tio.RescaleIntensity(
+    out_min_max=(0, 1), percentiles=(0.1, 99.9)
+)
+```
+
+**Step 3 — Neural Network Inference**
+```python
+model = SwinUNETR(
+    in_channels=1, out_channels=8,        # 8-class segmentation
+    feature_size=24, use_checkpoint=False
+)
+logits = sliding_window_inference(
+    input_tensor,
+    roi_size=(96, 96, 96),
+    sw_batch_size=4,
+    overlap=0.5,
+    mode="gaussian"
+)
+mask_array = torch.argmax(logits, dim=1, keepdim=True)
+```
+
+**Step 4 — Reproject to Native Space (critical fix for coordinate alignment)**
+```python
+pred_nifti = nib.Nifti1Image(mask_array, subj_spat.mri.affine)
+pred_sitk = sitk.ReadImage(temp_mask_path)
+resampler = sitk.ResampleImageFilter()
+resampler.SetReferenceImage(native_sitk)          # Use original DICOM as template
+resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+final_mask_sitk = resampler.Execute(pred_sitk)
+```
+This step ensures the output mask has the **exact same shape, spacing, and orientation** as the original DICOM, regardless of what TorchIO did internally.
+
+**Step 5 — Save**
+```python
+sitk.WriteImage(final_mask_sitk, f"MASK_FINAL_{int(time.time())}.nii.gz")
+print(json.dumps({"status": "success", "mask_path": mask_out_path}))
+```
+
+### Flask-Side Integration (`api_run_ai_segmentation`)
+
+After the subprocess completes:
+1. Mask is read back via `SimpleITK` (returns Z, Y, X array directly)
+2. **Z-axis sync**: Detects if pydicom ordered slices opposite to SimpleITK's physical ordering; if so, flips `mask_data[::-1]`
+3. **Dimension sync**: If shape doesn't exactly match `user_data['dims']`, applies `scipy.ndimage.zoom` with order=0
+4. **Class extraction**: Finds `max_class = np.max(mask_data)`; converts to binary `(mask == max_class) * 255`
+5. Injects as a new segmentation entry with key `"ai_swin_<timestamp>"`
+
+### DICOM Isolation
+Before calling the subprocess, Flask:
+- Creates `anonimizado/AI_RESULTS/temp_dicom_<uid>/` directory
+- Clears any previous files from that directory
+- Copies only the files belonging to the active series (by absolute path)
+- Passes this isolated directory as `--input` to the CLI
+
+### AI Segmentation Data Flow
+```
+USER CLICKS "Auto-Segmentar"
+         │
+         ▼
+POST /api/run_ai_segmentation
+         │
+         ├─→ Resolve DICOM file paths from session
+         ├─→ Copy files to temp_dicom_<uid>/
+         │
+         ├─→ ejecutar_ia_swin(temp_dicom_dir, out_dir)
+         │    │
+         │    └─→ subprocess.run(["medaimg/python", "run_ai_cli.py", ...])
+         │         └─→ Returns JSON: {"status","mask_path"}
+         │
+         ├─→ sitk.ReadImage(mask_path) → mask_data (Z,Y,X)
+         ├─→ Z-axis flip if orientation mismatch
+         ├─→ scipy.zoom if shape mismatch
+         ├─→ Binarize: max_class → 255
+         │
+         ├─→ user_data['segmentations']['ai_swin_<ts>'] = {mask, color, ...}
+         ├─→ user_data['active_segmentation_id'] = 'ai_swin_<ts>'
+         └─→ Return {"status": "success"}
+                  │
+                  ▼
+         Frontend reloads all 3 views + 3D iframe
+```
+
+### Output Files
+| File | Location | Description |
+|------|----------|-------------|
+| `input_vol_native.nii.gz` | `anonimizado/AI_RESULTS/` | Intermediate NIfTI for preprocessing |
+| `temp_mask.nii.gz` | `anonimizado/AI_RESULTS/` | Raw model output (TorchIO space) |
+| `MASK_FINAL_<ts>.nii.gz` | `anonimizado/AI_RESULTS/` | Final mask in native DICOM space |
+
+### Known Limitations
+- Python executable path is **hardcoded** to one machine's Conda install
+- Inference is **synchronous** — Flask worker blocks for the entire duration (30s–several minutes)
+- Model weights (`best_swin_unetr_model.pth`) are tracked by Git LFS or stored locally; not in the repo by default
+- 8-class output: only the dominant class (`max_class`) is surfaced to the user — multi-class visualization is not yet implemented
+
+---
+
 ## Conclusion
 
 This application is a **feature-rich medical imaging viewer** with impressive 3D visualization capabilities, but architecturally suited for **educational/research environments** rather than production clinical use. The lack of persistent storage and security hardening would need to be addressed for HIPAA-compliant deployment.
 
-**Recent Improvements (2025-11-30):**
-- ✅ Fixed zoom interaction issues with HU Picker and 3D Inspector
+**Improvements:**
+- ✅ Fixed zoom interaction issues with HU Picker and 3D Inspector (2025-11-30)
 - ✅ Resolved coordinate mapping bugs with aspect ratio scaling
 - ✅ Improved visual consistency at all zoom levels
-- ✅ Enhanced documentation with comprehensive coordinate system architecture
+- ✅ Multi-layer manual segmentation system (brush + polygon tools, undo, export)
+- ✅ Minimap navigation overlay for zoomed-in views
+- ✅ AI-powered auto-segmentation via Swin-UNETR plugin
+- ✅ Colormap selector for 2D and 3D views
+- ✅ MIP Inverted rendering mode
 
 **Strengths:**
 - Clean separation of 2D and 3D rendering pipelines
-- Sophisticated frontend with zoom, pan, histogram editing
+- Sophisticated frontend with zoom, pan, minimap, histogram editing
 - Multi-user session isolation
-- Flexible RT Structure overlay
-- **Robust coordinate mapping system** (recently fixed)
-- **Precise HU measurements at any zoom level** (recently fixed)
+- Flexible RT Structure overlay + up to 5 manual segmentation layers
+- AI segmentation isolated in its own process/environment (no dependency conflicts)
+- **Robust coordinate mapping system** (fixed 2025-11-30)
+- **Precise HU measurements at any zoom level** (fixed 2025-11-30)
 
 **Weaknesses:**
-- No data persistence
-- Memory-intensive session storage
+- No data persistence (everything lost on server restart)
+- Memory-intensive session storage (full volumes + masks per user)
 - Missing production security features
 - No cleanup mechanisms for uploaded files
+- AI inference is synchronous (blocks Flask worker for minutes)
+- Python executable path for AI is hardcoded to one machine
 - Some misleading function/variable names (legacy code)
 
 **Best Use Cases:**
