@@ -50,22 +50,7 @@ ANONIMIZADO_FOLDER = app.config['ANONIMIZADO_FOLDER']
 SEGMENTATION_COLORS = app.config['SEGMENTATION_COLORS']
 
 # --- 3. SISTEMA DE SESIÓN PARA MÚLTIPLES USUARIOS ---
-
-# Diccionario global que funciona como un almacén en memoria para los datos de cada sesión
-SERVER_SIDE_SESSION_STORE = {}
-
-def get_user_data():
-    """
-    Gestiona y recupera el diccionario de datos para el usuario actual.
-    Si el usuario es nuevo, le asigna un ID único y crea un espacio para sus datos.
-    """
-    if 'user_session_id' not in session:
-        user_id = str(uuid4())
-        session['user_session_id'] = user_id
-        SERVER_SIDE_SESSION_STORE[user_id] = {}
-    user_id = session['user_session_id']
-    # setdefault asegura que si el user_id se perdió por alguna razón, se cree un dict vacío
-    return SERVER_SIDE_SESSION_STORE.setdefault(user_id, {})
+from app.session.store import SERVER_SIDE_SESSION_STORE, get_user_data
 
 # --- 4. VARIABLES GLOBALES DE RENDERING (Bokeh) ---
 bokeh_server_started = False
