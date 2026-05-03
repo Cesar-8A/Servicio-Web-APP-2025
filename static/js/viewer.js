@@ -1306,11 +1306,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderSegmentationsList() {
         const countDisplay = document.getElementById('segCountDisplay');
-        if (countDisplay) countDisplay.textContent = `${viewState.segmentations.length}/5`;
+        if (countDisplay) countDisplay.textContent = `${viewState.segmentations.length}`;
 
         const newSegBtn = document.getElementById('newSegmentationBtn');
         if (newSegBtn) {
-            newSegBtn.disabled = viewState.segmentations.length >= 5;
+            newSegBtn.disabled = false;
         }
 
         const container = document.getElementById('segmentationsListContainer');
@@ -2049,10 +2049,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         const slider = document.getElementById(`slider_${view}`);
                         if (slider) updateImage(view, slider.value, true);
                     });
-                    
-                    // Forzar recarga del modelo 3D (si existe)
-                    const iframe = document.getElementById('DicomRender');
-                    if (iframe) iframe.src = iframe.src.split('?')[0] + '?t=' + new Date().getTime();
+
+                    // Actualizar lista de segmentaciones en el panel lateral
+                    loadSegmentations();
                 } else {
                     alert("⚠️ Error en IA: " + data.message);
                 }

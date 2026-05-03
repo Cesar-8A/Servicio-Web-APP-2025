@@ -88,7 +88,12 @@ for folder in [UPLOAD_FOLDER, UPLOAD_FOLDER_NRRD, ANONIMIZADO_FOLDER]:
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-SEGMENTATION_COLORS = ['#00FFFF', '#ADFF2F', '#FF8C00', '#FF00FF', '#FFD700']
+def _make_seg_color(index):
+    """Returns a visually distinct hex color using golden ratio hue stepping in HSV space."""
+    import colorsys
+    hue = (index * 0.618033988749895) % 1.0
+    r, g, b = colorsys.hsv_to_rgb(hue, 0.75, 0.90)
+    return '#{:02X}{:02X}{:02X}'.format(int(r * 255), int(g * 255), int(b * 255))
 
 # Inicialización de Panel y Bokeh para la vista 3D
 pn.extension('vtk')
@@ -202,7 +207,10 @@ def update_3d_render(user_data, mode):
             add_segmentation_to_plotter(user_data)
 
     plotter.view_isometric()
-    panel_vtk.param.trigger('object')
+    try:
+        panel_vtk.param.trigger('object')
+    except Exception:
+        pass
 
 
 def add_RT_to_plotter(user_data):
@@ -1015,11 +1023,8 @@ def create_segmentation():
     if not name.strip():
         return jsonify({"status": "error", "message": "El nombre no puede estar vacío"}), 400
     segs = user_data.get('segmentations', {})
-    if len(segs) >= 5:
-        return jsonify({"status": "error", "message": "Máximo 5 segmentaciones permitidas"}), 400
-    # Find lowest unused ID in 0-4
-    new_id = next(i for i in range(5) if i not in segs)
-    color = SEGMENTATION_COLORS[new_id]
+    new_id = next(i for i in range(10000) if i not in segs)
+    color = _make_seg_color(new_id)
     dims = user_data.get('dims', (1, 1, 1))
     segs[new_id] = {
         'name': name.strip(),
@@ -1235,19 +1240,45 @@ def logout():
 
 # --- LÓGICA DE IA SWIN-UNETR ---
 
+def _find_medaimg_python():
+    """
+    Localiza el ejecutable Python del entorno 'medaimg'.
+    Prioridad: variable de entorno MEDAIMG_PYTHON > venv > conda.
+    """
+    from_env = os.environ.get("MEDAIMG_PYTHON")
+    if from_env and os.path.isfile(from_env):
+        return from_env
+
+    home = os.path.expanduser("~")
+    candidates = [
+        os.path.join(home, "medaimg_venv", "bin", "python"),
+        os.path.join(home, "medaimg_venv", "Scripts", "python.exe"),
+        os.path.join(home, "anaconda3", "envs", "medaimg", "bin", "python"),
+        os.path.join(home, "miniconda3", "envs", "medaimg", "bin", "python"),
+        os.path.join(home, "miniforge3", "envs", "medaimg", "bin", "python"),
+        os.path.join(home, "anaconda3", "envs", "medaimg", "python.exe"),
+        os.path.join(home, "miniconda3", "envs", "medaimg", "python.exe"),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
 def ejecutar_ia_swin(dicom_input_path, output_folder):
     """
-    Llama al microservicio de IA usando la ruta absoluta del ejecutable
-    para evitar conflictos de entornos virtuales en Windows.
+    Llama al microservicio de IA usando el Python del entorno conda 'medaimg'.
+    Detecta automáticamente la ruta en macOS, Linux y Windows.
+    Se puede forzar con la variable de entorno MEDAIMG_PYTHON.
     """
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    
+
     ruta_script = os.path.join(base_dir, 'plugin_ia_swin', 'run_ai_cli.py')
     ruta_pesos = os.path.join(base_dir, 'plugin_ia_swin', 'best_swin_unetr_model.pth')
-    
-    # RUTA DIRECTA AL PYTHON DE LA IA (Basado en tu log de instalación)
-    python_ia_exe = r"C:\Users\jesus\anaconda3\envs\medaimg\python.exe"
-    
+
+    python_ia_exe = _find_medaimg_python()
+    if not python_ia_exe:
+        return {"status": "error", "message": "No se encontró el entorno 'medaimg'. Instálalo con: conda env create -f plugin_ia_swin/environment_macos.yml (o environment.yml en Windows). También puedes definir la variable MEDAIMG_PYTHON con la ruta al ejecutable."}
+
     comando = [
         python_ia_exe, ruta_script,
         "--input", dicom_input_path,
@@ -1358,7 +1389,6 @@ def api_run_ai_segmentation():
         mask_path = resultado.get("mask_path")
         
         try:
-            import time
             import SimpleITK as sitk
             import pydicom
             import numpy as np
@@ -1395,26 +1425,34 @@ def api_run_ai_segmentation():
                 zoom_factors = [t/m for t, m in zip(target_shape, mask_data.shape)]
                 mask_data = zoom(mask_data, zoom_factors, order=0)
                 
-            # 4. INYECCIÓN
-            max_class = np.max(mask_data)
-            if max_class > 0:
-                mask_data = np.where(mask_data == max_class, 255, 0).astype(np.uint8)
-            else:
-                mask_data = np.zeros(target_shape, dtype=np.uint8)
-                
+            # 4. INYECCIÓN MULTI-CLASE
             if 'segmentations' not in user_data:
                 user_data['segmentations'] = {}
-                
-            ai_seg_id = f"ai_swin_{int(time.time())}"
-            user_data['segmentations'][ai_seg_id] = {
-                'id': ai_seg_id,
-                'name': 'Segmentación IA',
-                'mask': mask_data,
-                'color': '#00FFFF',
-                'visible': True
-            }
-            user_data['active_segmentation_id'] = ai_seg_id
-            
+
+            segs = user_data['segmentations']
+
+            # Inject one layer per detected class (1–7), skipping empty classes
+            first_ai_slot = None
+            for class_id in range(1, 8):
+                class_mask = np.where(mask_data == class_id, 255, 0).astype(np.uint8)
+                if not np.any(class_mask):
+                    continue
+                slot = next(i for i in range(10000) if i not in segs)
+                segs[slot] = {
+                    'name': f'IA Clase {class_id}',
+                    'mask': class_mask,
+                    'color': _make_seg_color(slot),
+                    'visible': True,
+                    'last_polygon_operation': None
+                }
+                if first_ai_slot is None:
+                    first_ai_slot = slot
+
+            if first_ai_slot is None:
+                return jsonify({"status": "error", "message": "El modelo no detectó ninguna estructura en este volumen."})
+
+            user_data['active_segmentation_id'] = first_ai_slot
+
             print(f"\n[ÉXITO] Matriz normalizada y proyectada perfectamente sin usar TorchIO Inverse.")
             return jsonify({"status": "success"})
             
