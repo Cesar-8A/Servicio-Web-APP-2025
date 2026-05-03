@@ -18,6 +18,12 @@ from io import BytesIO
 
 # Librerías para procesamiento científico y de imágenes
 import numpy as np
+import time
+import shutil
+import nibabel as nib
+from scipy.ndimage import zoom
+import subprocess
+import json
 import numpy.ma as ma
 import pydicom  # Para leer archivos DICOM
 import nrrd     # Para leer archivos NRRD (RT Struct)
@@ -133,6 +139,7 @@ def create_or_get_plotter(user_data):
     # Configuración inicial del plotter
     plotter = pv.Plotter(off_screen=True)
     plotter.set_background("black")
+    plotter.enable_depth_peeling()
     
     panel_vtk = pn.pane.VTK(plotter.ren_win, width=400, height=500, name='vtk_pane')
     panel_column = pn.Column(panel_vtk)
@@ -195,6 +202,13 @@ def update_3d_render(user_data, mode):
     # Re-dibujar RT Struct si existe
     if 'RT' in user_data and 'RT_aligned' in user_data:
         add_RT_to_plotter(user_data)
+        
+    # Re-dibujar Segmentación desde el sistema Multicapa
+    active_id = user_data.get('active_segmentation_id')
+    if active_id and 'segmentations' in user_data and active_id in user_data['segmentations']:
+        seg_mask = user_data['segmentations'][active_id]['mask']
+        if seg_mask is not None and np.any(seg_mask):
+            add_segmentation_to_plotter(user_data)
 
     plotter.view_isometric()
     panel_vtk.param.trigger('object')
@@ -253,6 +267,53 @@ def add_RT_to_plotter(user_data):
         error_msg = f"Error crítico RT: {str(e)}"
         print(error_msg)
         return False, error_msg
+    
+def add_segmentation_to_plotter(user_data):
+    """
+    Convierte la máscara de segmentación en un objeto 3D flotante.
+    """
+    plotter = user_data.get('vtk_plotter')
+    panel_vtk = user_data.get('vtk_panel')
+    grid_full = user_data.get('grid_full')
+    seg_mask = None
+    active_id = user_data.get('active_segmentation_id')
+    if active_id and 'segmentations' in user_data and active_id in user_data['segmentations']:
+        seg_mask = user_data['segmentations'][active_id]['mask']
+
+    if not all([plotter, panel_vtk, grid_full is not None, seg_mask is not None]):
+        return False
+
+    try:
+        # Verificar matemáticamente que la máscara no esté vacía
+        if np.max(seg_mask) == 0:
+            print("ADVERTENCIA: La máscara 3D está vacía (puros ceros). No se renderizará.")
+            return False
+
+        seg_dims = np.array(seg_mask.shape) + 1
+        seg_grid = pv.ImageData(
+            dimensions=seg_dims,
+            spacing=grid_full.spacing,
+            origin=grid_full.origin
+        )
+
+        seg_grid.cell_data["values"] = seg_mask.flatten(order="F")
+        seg_grid = seg_grid.cell_data_to_point_data()
+
+        # Usamos 1.0 como contorno para asegurar que atrape cualquier valor detectado
+        surface = seg_grid.contour([1.0])
+
+        if surface.n_points == 0:
+            print("ADVERTENCIA: El contorno 3D no generó geometría.")
+            return False
+
+        # Opacity 1.0 para que sea una roca sólida color Cyan, imposible de perder de vista
+        plotter.add_mesh(surface, color="cyan", opacity=1.0, name="ia_segmentation", smooth_shading=True)
+        print(">>> Malla 3D Cyan agregada exitosamente al visor <<<")
+
+        return True
+    except Exception as e:
+        print(f"Error al renderizar segmentación de IA en 3D: {e}")
+        return False
 
 def _extract_spacing_for_series(unique_id, user_data):
     """Calcula el espaciado entre píxeles (dx, dy, dz) de forma robusta."""
@@ -1230,7 +1291,198 @@ def logout():
     flash('Has cerrado sesión', 'info')
     return redirect(url_for('home'))
 
+# --- LÓGICA DE IA SWIN-UNETR ---
+
+def ejecutar_ia_swin(dicom_input_path, output_folder):
+    """
+    Llama al microservicio de IA usando la ruta absoluta del ejecutable
+    para evitar conflictos de entornos virtuales en Windows.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    ruta_script = os.path.join(base_dir, 'plugin_ia_swin', 'run_ai_cli.py')
+    ruta_pesos = os.path.join(base_dir, 'plugin_ia_swin', 'best_swin_unetr_model.pth')
+    
+    # RUTA DIRECTA AL PYTHON DE LA IA (Basado en tu log de instalación)
+    python_ia_exe = r"C:\Users\jesus\anaconda3\envs\medaimg\python.exe"
+    
+    comando = [
+        python_ia_exe, ruta_script,
+        "--input", dicom_input_path,
+        "--out_dir", output_folder,
+        "--weights", ruta_pesos
+    ]
+    
+    print(f"\nIniciando Motor de IA...")
+    print(f"Ejecutando: {' '.join(comando)}\n")
+    
+    proceso = subprocess.run(comando, capture_output=True, text=True)
+    
+    try:
+        # Buscamos la respuesta JSON en la salida
+        lineas = [line for line in proceso.stdout.strip().split('\n') if line]
+        if not lineas:
+            raise ValueError("El script de IA no devolvió ninguna salida.")
+            
+        respuesta = json.loads(lineas[-1])
+        return respuesta
+    except Exception as e:
+        print(">>> ERROR CRÍTICO EN IA <<<")
+        print("STDOUT:", proceso.stdout)
+        print("STDERR:", proceso.stderr)
+        return {"status": "error", "message": "Fallo al ejecutar el modelo de IA. Revisa la consola."}
+
+def normalize_ai_mask(mask_data, user_data, z_inverted=False):
+    """
+    Convierte una máscara del modelo IA al formato exacto del visor (Z,Y,X).
+    Blindada contra inversiones anatómicas y rotaciones de 90 grados.
+    """
+    from scipy.ndimage import zoom
+    import numpy as np
+
+    vol = user_data.get("volume_raw")
+    if vol is None:
+        raise ValueError("No hay un volumen base cargado en el visor.")
+
+    Z, Y, X = vol.shape
+    mask = np.array(mask_data)
+
+    # 1. Eliminar batch o canal extra si el modelo lo exportó (ej. [1, Z, Y, X])
+    if mask.ndim == 4:
+        mask = mask[0]
+
+    # 2. SEGURO BIOMÉDICO: Invertir el eje Z si el NIfTI va en contra del DICOM
+    if z_inverted:
+        print("Inversión de Eje Z detectada. Corrigiendo...")
+        mask = mask[::-1, :, :]
+
+    # 3. Transposición de la librería externa (nibabel lee X,Y,Z por defecto)
+    if mask.shape == (X, Y, Z):
+        mask = np.transpose(mask, (2, 1, 0))
+    elif mask.shape == (Y, X, Z):
+        mask = np.transpose(mask, (2, 0, 1))
+    elif mask.shape == (Z, X, Y):
+        mask = np.transpose(mask, (0, 2, 1))
+
+    # 4. Reescalado forzado por fuerza bruta (Zoom Nearest Neighbor)
+    if mask.shape != (Z, Y, X):
+        print(f"Forzando reescalado de máscara: {mask.shape} -> {(Z, Y, X)}")
+        zoom_factors = (Z / mask.shape[0], Y / mask.shape[1], X / mask.shape[2])
+        mask = zoom(mask, zoom_factors, order=0)
+
+    # 5. Binarización estricta (Solo tumor visible al 100%)
+    mask = (mask > 0).astype(np.uint8) * 255
+
+    print("VOL SHAPE (Lienzo):", vol.shape)
+    print("MASK SHAPE (Final):", mask.shape)
+
+    return mask
+
+@app.route('/api/run_ai_segmentation', methods=['POST'])
+def api_run_ai_segmentation():
+    user_data = get_user_data()
+    unique_id = user_data.get('unique_id')
+    
+    if not unique_id or 'dicom_series' not in user_data or unique_id not in user_data['dicom_series']:
+        return jsonify({"status": "error", "message": "No hay un estudio cargado en el visor."})
+        
+    rutas = user_data['dicom_series'][unique_id]["ruta_archivos"]
+    if not rutas:
+        return jsonify({"status": "error", "message": "No se encontraron los archivos DICOM físicos."})
+        
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    out_dir = os.path.abspath(os.path.join(base_dir, 'anonimizado', 'AI_RESULTS'))
+    os.makedirs(out_dir, exist_ok=True)
+    
+    # Aislamiento de serie DICOM
+    import shutil
+    temp_dicom_dir = os.path.join(out_dir, f"temp_dicom_{unique_id}")
+    os.makedirs(temp_dicom_dir, exist_ok=True)
+    
+    for f in os.listdir(temp_dicom_dir):
+        os.remove(os.path.join(temp_dicom_dir, f))
+        
+    for ruta_relativa in rutas:
+        src_path = os.path.abspath(os.path.join(base_dir, ruta_relativa))
+        if os.path.exists(src_path):
+            shutil.copy(src_path, temp_dicom_dir)
+            
+    dicom_input_path = temp_dicom_dir
+    
+    # Ejecución del microservicio
+    resultado = ejecutar_ia_swin(dicom_input_path, out_dir)
+    
+    if resultado.get("status") == "success":
+        mask_path = resultado.get("mask_path")
+        
+        try:
+            import time
+            import SimpleITK as sitk
+            import pydicom
+            import numpy as np
+            
+            # 1. LEER LA MÁSCARA ALINEADA
+            # SITK devuelve directamente el formato nativo (Z, Y, X) sin rotaciones raras
+            mask_sitk = sitk.ReadImage(mask_path)
+            mask_data = sitk.GetArrayFromImage(mask_sitk)
+            
+            # 2. SINCRONIZACIÓN DEL EJE Z (El anti-código de barras)
+            # Detectamos cómo ordenó tu Flask las imágenes (InstanceNumber)
+            viewer_files = [os.path.abspath(os.path.join(base_dir, r)) for r in rutas]
+            viewer_files_sorted = sorted(viewer_files, key=lambda f: int(pydicom.dcmread(f, stop_before_pixels=True).InstanceNumber))
+            
+            z_start_flask = float(pydicom.dcmread(viewer_files_sorted[0], stop_before_pixels=True).ImagePositionPatient[2])
+            z_end_flask = float(pydicom.dcmread(viewer_files_sorted[-1], stop_before_pixels=True).ImagePositionPatient[2])
+            flask_z_dir = z_end_flask - z_start_flask
+            
+            # Detectamos cómo ordenó SimpleITK las imágenes (Físicamente)
+            reader = sitk.ImageSeriesReader()
+            sitk_files = reader.GetGDCMSeriesFileNames(dicom_input_path)
+            z_start_sitk = float(pydicom.dcmread(sitk_files[0], stop_before_pixels=True).ImagePositionPatient[2])
+            z_end_sitk = float(pydicom.dcmread(sitk_files[-1], stop_before_pixels=True).ImagePositionPatient[2])
+            sitk_z_dir = z_end_sitk - z_start_sitk
+            
+            # Si pydicom ordenó al revés que las coordenadas físicas, empatamos las matrices
+            if (flask_z_dir * sitk_z_dir) < 0:
+                mask_data = mask_data[::-1, :, :]
+                
+            # 3. SEGURO DIMENSIONAL FINAL (Zoom escalar)
+            target_shape = user_data['dims']
+            if mask_data.shape != target_shape:
+                from scipy.ndimage import zoom
+                zoom_factors = [t/m for t, m in zip(target_shape, mask_data.shape)]
+                mask_data = zoom(mask_data, zoom_factors, order=0)
+                
+            # 4. INYECCIÓN
+            max_class = np.max(mask_data)
+            if max_class > 0:
+                mask_data = np.where(mask_data == max_class, 255, 0).astype(np.uint8)
+            else:
+                mask_data = np.zeros(target_shape, dtype=np.uint8)
+                
+            if 'segmentations' not in user_data:
+                user_data['segmentations'] = {}
+                
+            ai_seg_id = f"ai_swin_{int(time.time())}"
+            user_data['segmentations'][ai_seg_id] = {
+                'id': ai_seg_id,
+                'name': 'Segmentación IA',
+                'mask': mask_data,
+                'color': '#00FFFF',
+                'visible': True
+            }
+            user_data['active_segmentation_id'] = ai_seg_id
+            
+            print(f"\n[ÉXITO] Matriz normalizada y proyectada perfectamente sin usar TorchIO Inverse.")
+            return jsonify({"status": "success"})
+            
+        except Exception as e:
+            print(f"Error crítico en inyección: {str(e)}")
+            return jsonify({"status": "error", "message": f"Error de inyección: {e}"})
+    else:
+        return jsonify({"status": "error", "message": resultado.get("message", "Error desconocido")})
+
 # --- 8. INICIO DE LA APLICACIÓN ---
 if __name__ == '__main__':
     # Se ejecuta solo cuando el script es el punto de entrada principal
-    app.run(debug=True, port=5001)
+    app.run(debug=True, port=5001, threaded=False)
