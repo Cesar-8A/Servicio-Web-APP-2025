@@ -35,9 +35,21 @@
               </button>
 
               <button id="windowLevelBtn" class="btn btn-secondary btn-icon shadow-sm"
-                      data-bs-toggle="tooltip" data-bs-placement="right" 
-                      title="Ajuste de Ventana y Nivel ({% if modality == 'MR' %}Brillo/Contraste{% else %}Densidad{% endif %}).">
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Ajuste de Ventana y Nivel (clic derecho+arrastrar en la imagen también ajusta W/L).">
                   <i class="bi bi-brightness-high"></i>
+              </button>
+
+              <button id="crosshairBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Vistas enlazadas: clic en imagen actualiza los otros cortes.">
+                  <i class="bi bi-plus-lg"></i>
+              </button>
+
+              <button id="cineBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Reproducción CINE (auto-scroll de cortes).">
+                  <i class="bi bi-play-circle"></i>
               </button>
               
               <a href="{{ url_for('anonimize') }}" class="btn btn-secondary btn-icon shadow-sm"
@@ -45,6 +57,42 @@
                       title="Módulo de Anonimización.">
                   <i class="bi bi-shield-lock"></i>
               </a>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <div class="sidebar-group-title">Imagen</div>
+          <div class="d-flex flex-wrap justify-content-center gap-2">
+              <button id="invertBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Invertir colores (negativo).">
+                  <i class="bi bi-circle-half"></i>
+              </button>
+              <button id="flipHBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Voltear horizontalmente.">
+                  <i class="bi bi-symmetry-vertical"></i>
+              </button>
+              <button id="flipVBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Voltear verticalmente.">
+                  <i class="bi bi-symmetry-horizontal"></i>
+              </button>
+              <button id="rulerBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Regla: mide distancias en mm (clic + arrastrar).">
+                  <i class="bi bi-rulers"></i>
+              </button>
+              <button id="screenshotBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Capturar imagen de las 3 vistas.">
+                  <i class="bi bi-camera-fill"></i>
+              </button>
+              <button id="resetViewBtn" class="btn btn-secondary btn-icon shadow-sm"
+                      data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Restablecer zoom y posición de todas las vistas.">
+                  <i class="bi bi-arrows-angle-contract"></i>
+              </button>
           </div>
         </div>
 
@@ -287,16 +335,44 @@
                     <input type="range" class="form-range" id="ww_slider" min="1" max="4000" value="400">
                 </div>
                 
-                <label class="small text-muted mb-1">Preajustes:</label>
-                <div class="btn-group-presets mt-1" role="group">
-                    <button type="button" id="presetBtnLung" class="btn btn-sm btn-outline-secondary" title="Pulmón">
-                        <i class="bi bi-lungs"></i> Pulmón
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <label class="small text-muted mb-0">Preajustes</label>
+                    <span class="badge" style="background:rgba(255,255,255,0.07); color:var(--gris-debil); font-size:0.58rem; letter-spacing:0.5px; font-weight:500;">TECLAS 1–5</span>
+                </div>
+                <div class="preset-grid">
+                    <button type="button" id="presetBtnLung" data-preset="LUNG" class="preset-card">
+                        <i class="bi bi-lungs preset-icon text-info"></i>
+                        <span class="preset-name">Pulmón</span>
+                        <span class="preset-values">WC -600 · WW 1500</span>
+                        <span class="preset-key">1</span>
                     </button>
-                    <button type="button" id="presetBtnBone" class="btn btn-sm btn-outline-secondary" title="Hueso">
-                        <i class="bi bi-box"></i> Hueso
+                    <button type="button" id="presetBtnBone" data-preset="BONE" class="preset-card">
+                        <i class="bi bi-box-seam preset-icon" style="color:#c8b8a2;"></i>
+                        <span class="preset-name">Hueso</span>
+                        <span class="preset-values">WC 480 · WW 2500</span>
+                        <span class="preset-key">2</span>
                     </button>
-                    <button type="button" id="presetBtnSoftTissue" class="btn btn-sm btn-outline-secondary" title="Tejido">
-                        <i class="bi bi-activity"></i> Tejido
+                    <button type="button" id="presetBtnSoftTissue" data-preset="TISSUE" class="preset-card">
+                        <i class="bi bi-activity preset-icon text-success"></i>
+                        <span class="preset-name">Tejido</span>
+                        <span class="preset-values">WC 40 · WW 400</span>
+                        <span class="preset-key">3</span>
+                    </button>
+                    <button type="button" id="presetBtnBrain" data-preset="BRAIN" class="preset-card">
+                        <i class="bi bi-cpu preset-icon" style="color:#c084fc;"></i>
+                        <span class="preset-name">Cerebro</span>
+                        <span class="preset-values">WC 40 · WW 80</span>
+                        <span class="preset-key">4</span>
+                    </button>
+                    <button type="button" id="presetBtnHighContrast" data-preset="HIGH_CONTRAST" class="preset-card preset-card-full preset-card-accent">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-brightness-high-fill preset-icon"></i>
+                            <div class="text-start">
+                                <span class="preset-name d-block">Alto Contraste</span>
+                                <span class="preset-values">WC 60 · WW 200</span>
+                            </div>
+                        </div>
+                        <span class="preset-key">5</span>
                     </button>
                 </div>
 
@@ -344,16 +420,40 @@
             
             <!-- PRESETS DE VENTANA -->
             <div class="mb-3">
-                <label class="small text-secondary mb-2 d-block">Presets de Ventana:</label>
-                <div class="d-flex flex-wrap gap-1">
+                <label class="small text-secondary mb-2 d-block" style="letter-spacing:0.5px; text-transform:uppercase; font-size:0.65rem;">Presets de Ventana</label>
+                <div class="preset-pills-grid">
                     {% if modality == 'MR' %}
-                        <button class="btn btn-xs btn-outline-info flex-grow-1" onclick="setWindowPreset('MR_AUTO')">Optimizar</button>
-                        <button class="btn btn-xs btn-outline-secondary flex-grow-1" onclick="setWindowPreset('MR_CONTRAST')">Alto Contraste</button>
+                        <button class="preset-pill" data-preset="MR_AUTO" title="WC=500, WW=1000" onclick="setWindowPreset('MR_AUTO')">
+                            <i class="bi bi-magic"></i> Optimizar
+                        </button>
+                        <button class="preset-pill" data-preset="MR_CONTRAST" title="WC=300, WW=600" onclick="setWindowPreset('MR_CONTRAST')">
+                            <i class="bi bi-contrast"></i> Contraste
+                        </button>
+                        <button class="preset-pill" data-preset="MR_T1" title="T1 — WC=300, WW=600" onclick="setWindowPreset('MR_T1')">
+                            T1
+                        </button>
+                        <button class="preset-pill" data-preset="MR_T2" title="T2 — WC=400, WW=800" onclick="setWindowPreset('MR_T2')">
+                            T2
+                        </button>
                     {% else %}
-                        <button class="btn btn-xs btn-outline-info" style="font-size: 0.7rem;" onclick="setWindowPreset('LUNG')">Pulmón</button>
-                        <button class="btn btn-xs btn-outline-info" style="font-size: 0.7rem;" onclick="setWindowPreset('BONE')">Hueso</button>
-                        <button class="btn btn-xs btn-outline-info" style="font-size: 0.7rem;" onclick="setWindowPreset('TISSUE')">Tejido</button>
-                        <button class="btn btn-xs btn-outline-info" style="font-size: 0.7rem;" onclick="setWindowPreset('BRAIN')">Cerebro</button>
+                        <button class="preset-pill" data-preset="LUNG" title="WC=-600, WW=1500" onclick="setWindowPreset('LUNG')">
+                            <i class="bi bi-lungs"></i> Pulmón
+                        </button>
+                        <button class="preset-pill" data-preset="BONE" title="WC=480, WW=2500" onclick="setWindowPreset('BONE')">
+                            <i class="bi bi-box-seam"></i> Hueso
+                        </button>
+                        <button class="preset-pill" data-preset="TISSUE" title="WC=40, WW=400" onclick="setWindowPreset('TISSUE')">
+                            <i class="bi bi-activity"></i> Tejido
+                        </button>
+                        <button class="preset-pill" data-preset="BRAIN" title="WC=40, WW=80" onclick="setWindowPreset('BRAIN')">
+                            <i class="bi bi-cpu"></i> Cerebro
+                        </button>
+                        <button class="preset-pill" data-preset="ABDOMEN" title="WC=50, WW=400" onclick="setWindowPreset('ABDOMEN')">
+                            <i class="bi bi-person-lines-fill"></i> Abdomen
+                        </button>
+                        <button class="preset-pill preset-pill-accent" data-preset="HIGH_CONTRAST" title="WC=60, WW=200 — Maximiza contraste de tejido" onclick="setWindowPreset('HIGH_CONTRAST')">
+                            <i class="bi bi-brightness-high-fill"></i> Alto Contraste
+                        </button>
                     {% endif %}
                 </div>
             </div>
@@ -468,6 +568,9 @@
                 <div class="image-wrapper mt-1 bg-black rounded border border-secondary position-relative">
                     <canvas id="canvas_{{ view }}"></canvas>
                     <canvas id="overlay_{{ view }}" style="pointer-events:none;"></canvas>
+                    <!-- Crosshair lines (visibles solo en modo vistas enlazadas) -->
+                    <div class="ch-h" id="ch_h_{{ view }}"></div>
+                    <div class="ch-v" id="ch_v_{{ view }}"></div>
 
                     <div class="minimap-container" id="minimap_container_{{ view }}">
                         <canvas class="minimap-canvas" id="minimap_canvas_{{ view }}" width="100" height="100"></canvas>
@@ -495,8 +598,46 @@
                     </div>
                 </div>
                 {% else %}
-                <div class="iframe-wrapper mt-1 bg-black rounded border border-secondary h-100">
-                  <iframe src="http://127.0.0.1:5010/panel" id="DicomRender" class="w-100 h-100" allowfullscreen></iframe>
+                <div class="render3d-wrapper mt-1 rounded border border-secondary h-100 position-relative"
+                     style="background:#0a0e17;display:flex;flex-direction:column;">
+                  <!-- Barra de controles 3D -->
+                  <div class="render3d-toolbar d-flex align-items-center gap-1 p-1 border-bottom border-secondary flex-shrink-0"
+                       style="background:#111c2e;">
+                    <!-- Controles de vista PNG (visibles siempre excepto cuando Three.js está activo) -->
+                    <div id="png-view-btns" class="d-flex gap-1">
+                      <button class="btn btn-xs btn-outline-secondary view3d-btn active" data-view="isometric" title="Isométrico"><i class="bi bi-box"></i></button>
+                      <button class="btn btn-xs btn-outline-secondary view3d-btn" data-view="front" title="Frontal"><i class="bi bi-front"></i></button>
+                      <button class="btn btn-xs btn-outline-secondary view3d-btn" data-view="side" title="Lateral"><i class="bi bi-align-center"></i></button>
+                      <button class="btn btn-xs btn-outline-secondary view3d-btn" data-view="top" title="Superior"><i class="bi bi-align-top"></i></button>
+                    </div>
+                    <!-- Pista de interacción Three.js (visible en isosurface) -->
+                    <span id="threejs-hint" class="text-muted" style="font-size:0.68rem;display:none;">
+                      <i class="bi bi-arrows-move"></i> Arrastrar·Rotar &nbsp;
+                      <i class="bi bi-zoom-in"></i> Scroll·Zoom &nbsp;
+                      <i class="bi bi-hand-index"></i> Clic der·Mover
+                    </span>
+                    <button class="btn btn-xs btn-outline-secondary ms-auto" id="refresh3dBtn" title="Actualizar render">
+                      <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                  </div>
+
+                  <!-- Contenedor Three.js (modo isosurface — rotación libre) -->
+                  <div id="threejs-container" class="flex-grow-1" style="display:none;cursor:grab;"></div>
+
+                  <!-- Contenedor PNG (modo volume / MIP) -->
+                  <div id="png-container" class="flex-grow-1 position-relative overflow-hidden">
+                    <div id="render3dSpinner"
+                         class="position-absolute top-50 start-50 translate-middle d-none"
+                         style="z-index:10;">
+                      <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Cargando...</span>
+                      </div>
+                    </div>
+                    <img id="DicomRender"
+                         src="/render_3d_frame"
+                         alt="Render 3D"
+                         style="width:100%;height:100%;object-fit:contain;display:block;">
+                  </div>
                 </div>
                 {% endif %}
               </div>
@@ -504,13 +645,50 @@
           {% endfor %}
         </div>
       {% endif %}
+
+      <!-- ===== BARRA CINE ===== -->
+      <div id="cine-bar" class="cine-bar d-none">
+        <button id="cinePrevBtn" class="btn btn-xs btn-outline-secondary" title="Ir al inicio">
+          <i class="bi bi-skip-start-fill"></i>
+        </button>
+        <button id="cinePlayBtn" class="btn btn-xs btn-primary px-3" title="Play / Pausa">
+          <i class="bi bi-play-fill" id="cinePlayIcon"></i>
+        </button>
+        <button id="cineNextBtn" class="btn btn-xs btn-outline-secondary" title="Ir al final">
+          <i class="bi bi-skip-end-fill"></i>
+        </button>
+        <div class="vr mx-1 bg-secondary" style="width:1px;opacity:.4;"></div>
+        <span class="text-muted small">Vista:</span>
+        <select id="cineViewSelect" class="form-select form-select-sm bg-dark text-light border-secondary" style="width:auto;padding:2px 6px;">
+          <option value="all" selected>Todas</option>
+          <option value="axial">Axial</option>
+          <option value="sagital">Sagital</option>
+          <option value="coronal">Coronal</option>
+        </select>
+        <div class="vr mx-1 bg-secondary" style="width:1px;opacity:.4;"></div>
+        <span class="text-muted small">FPS:</span>
+        <input type="range" id="cineFpsSlider" min="1" max="30" value="8"
+               class="form-range mx-1" style="width:80px;">
+        <span id="cineFpsDisplay" class="text-light small fw-bold" style="min-width:20px;">8</span>
+        <div class="vr mx-1 bg-secondary" style="width:1px;opacity:.4;"></div>
+        <div class="form-check form-check-inline mb-0">
+          <input class="form-check-input" type="checkbox" id="cineLoopCheck" checked>
+          <label class="form-check-label text-muted small" for="cineLoopCheck">Loop</label>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>
 
 <script>
     const DICOM_MODALITY = "{{ modality }}";
+    const CURRENT_RENDER_MODE = "{{ current_render_mode }}";
+    const DICOM_SPACING = { dx: {{ sp_dx }}, dy: {{ sp_dy }}, dz: {{ sp_dz }} };
 </script>
+<!-- Three.js para visor 3D interactivo (isosurface) -->
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="{{ url_for('static', filename='js/viewer.js') }}"></script>
 
 <div class="modal fade" id="metadataModal" tabindex="-1" aria-hidden="true">

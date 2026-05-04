@@ -108,15 +108,33 @@ document.addEventListener('DOMContentLoaded', function() {
         baseImages: { axial: null, sagital: null, coronal: null },
         inspectorMode: false,
         segmentationMode: false,
+        crosshairMode: false,
+        rulerMode: false,
         brushSize: 1,
         paintMode: 'paint',
         segmentationTool: 'brush', // 'brush' or 'polygon'
-        scales: { axial: 1.0, coronal: 1.0, sagittal: 1.0 }, // Aspect ratio scaling factors
+        scales: (typeof DICOM_SPACING !== 'undefined' && DICOM_SPACING.dx > 0)
+            ? { axial:    DICOM_SPACING.dy / DICOM_SPACING.dx,
+                coronal:  DICOM_SPACING.dz / DICOM_SPACING.dx,
+                sagittal: DICOM_SPACING.dz / DICOM_SPACING.dx }
+            : { axial: 1.0, coronal: 1.0, sagittal: 1.0 },
         colormap: 'gray',
         lastVoxel: { x: null, y: null, z: null },
         activeSegmentationId: null,
         segmentations: []
     };
+
+    // Posición de la intersección de los tres planos (en índices de vóxel)
+    const crosshairState = { x: null, y: null, z: null };
+
+    // Estado CINE
+    const CINE = { active: false, view: 'all', fps: 8, loop: true, _id: null };
+
+    // Transformaciones de imagen (flip/invert) — globales, aplicadas a todas las vistas
+    const viewTransforms = { flipH: false, flipV: false, invert: false };
+
+    // Estado de la regla (ruler)
+    const rulerState = { active: false, ptA: null, ptB: null, view: null, drawing: false };
 
     // --- POLYGON STATE ---
     const polygonState = {
@@ -272,17 +290,20 @@ document.addEventListener('DOMContentLoaded', function() {
     window.setWindowPreset = function(preset) {
         let ww, wc;
         switch(preset) {
-            case 'LUNG': ww = 1500; wc = -600; break;
-            case 'BONE': ww = 2500; wc = 480; break;
-            case 'TISSUE': ww = 400; wc = 40; break;
-            case 'BRAIN': ww = 80; wc = 40; break;
-            case 'MR_AUTO': ww = 1000; wc = 500; break;
-            case 'MR_CONTRAST': ww = 600; wc = 300; break;
+            case 'LUNG':          ww = 1500; wc = -600; break;
+            case 'BONE':          ww = 2500; wc =  480; break;
+            case 'TISSUE':        ww =  400; wc =   40; break;
+            case 'BRAIN':         ww =   80; wc =   40; break;
+            case 'ABDOMEN':       ww =  400; wc =   50; break;
+            case 'HIGH_CONTRAST': ww =  200; wc =   60; break;
+            case 'MR_AUTO':       ww = 1000; wc =  500; break;
+            case 'MR_CONTRAST':   ww =  600; wc =  300; break;
+            case 'MR_T1':         ww =  600; wc =  300; break;
+            case 'MR_T2':         ww =  800; wc =  400; break;
             default: return;
         }
-        // Llamamos a la función interna que ya maneja sliders y actualización de imágenes
         updateWWWC(ww, wc);
-        highlightPreset(preset.startsWith('MR') ? null : `presetBtn${preset.charAt(0) + preset.slice(1).toLowerCase()}`);
+        highlightPreset(preset);
     };
     
     // El debounce se mantiene para la escritura manual en los campos.
@@ -308,55 +329,52 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // --- LÓGICA DE PRESETS CON FEEDBACK VISUAL ---
     
-    // Función para resaltar el botón activo
-    function highlightPreset(activeId) {
-        // Lista de IDs de los botones
-        const presets = ['presetBtnLung', 'presetBtnBone', 'presetBtnSoftTissue'];
-        
-        presets.forEach(id => {
-            const btn = document.getElementById(id);
-            if (btn) {
-                // 1. Limpiamos el estilo activo de TODOS
-                btn.classList.remove('preset-active');
-                // 2. Volvemos al estilo gris por defecto
+    function highlightPreset(presetName) {
+        document.querySelectorAll('[data-preset]').forEach(btn => {
+            btn.classList.remove('preset-active');
+            // Solo restaurar btn-outline-secondary en botones Bootstrap normales
+            if (!btn.classList.contains('preset-card') && !btn.classList.contains('preset-pill')) {
                 btn.classList.add('btn-outline-secondary');
             }
         });
-
-        // 3. Activamos SOLO el que se clickeó (si hay alguno)
-        if (activeId) {
-            const activeBtn = document.getElementById(activeId);
-            if (activeBtn) {
-                activeBtn.classList.remove('btn-outline-secondary'); // Quitar gris
-                activeBtn.classList.add('preset-active'); // Poner azul médico
-            }
+        if (presetName) {
+            document.querySelectorAll(`[data-preset="${presetName}"]`).forEach(btn => {
+                if (!btn.classList.contains('preset-card') && !btn.classList.contains('preset-pill')) {
+                    btn.classList.remove('btn-outline-secondary');
+                }
+                btn.classList.add('preset-active');
+            });
         }
     }
 
-    // Listeners para Presets
-    document.getElementById('presetBtnLung')?.addEventListener('click', () => {
-        updateWWWC(1500, -600);
-        highlightPreset('presetBtnLung');
+    // Listeners para Presets — cada botón delega en setWindowPreset para consistencia
+    const PRESET_BTN_MAP = {
+        presetBtnLung:         'LUNG',
+        presetBtnBone:         'BONE',
+        presetBtnSoftTissue:   'TISSUE',
+        presetBtnBrain:        'BRAIN',
+        presetBtnHighContrast: 'HIGH_CONTRAST',
+    };
+    Object.entries(PRESET_BTN_MAP).forEach(([id, preset]) => {
+        document.getElementById(id)?.addEventListener('click', () => window.setWindowPreset(preset));
     });
-    
-    document.getElementById('presetBtnBone')?.addEventListener('click', () => {
-        updateWWWC(2500, 480);
-        highlightPreset('presetBtnBone');
-    });
-    
-    document.getElementById('presetBtnSoftTissue')?.addEventListener('click', () => {
-        updateWWWC(400, 40);
-        highlightPreset('presetBtnSoftTissue');
-    });
-    
+
     wwSlider?.addEventListener('input', () => {
         updateWWWC(parseInt(wwSlider.value), parseInt(wcSlider.value), 'sliders');
-        highlightPreset(null); // Apagar botones
+        highlightPreset(null);
     });
-    
+
     wcSlider?.addEventListener('input', () => {
         updateWWWC(parseInt(wwSlider.value), parseInt(wcSlider.value), 'sliders');
-        highlightPreset(null); // Apagar botones
+        highlightPreset(null);
+    });
+
+    // Atajos de teclado: teclas 1-5 activan presets CT (solo si no hay foco en input)
+    document.addEventListener('keydown', (e) => {
+        if (document.activeElement.matches('input, textarea, select')) return;
+        const keyPresets = { '1': 'LUNG', '2': 'BONE', '3': 'TISSUE', '4': 'BRAIN', '5': 'HIGH_CONTRAST' };
+        const preset = keyPresets[e.key];
+        if (preset) window.setWindowPreset(preset);
     });
 
 
@@ -436,8 +454,14 @@ document.addEventListener('DOMContentLoaded', function() {
             zs.panY = (wrapper.clientHeight - canvas.height) / 2;
         }
 
-        // 3. Dibujar imagen base
+        // 3. Dibujar imagen base (con flip si está activo)
+        ctx.save();
+        if (viewTransforms.flipH || viewTransforms.flipV) {
+            ctx.translate(viewTransforms.flipH ? canvas.width : 0, viewTransforms.flipV ? canvas.height : 0);
+            ctx.scale(viewTransforms.flipH ? -1 : 1, viewTransforms.flipV ? -1 : 1);
+        }
         ctx.drawImage(baseImage, 0, 0);
+        ctx.restore();
 
         // 4. APLICAR LUT DEL HISTOGRAMA (Respuesta en tiempo real)
         // Solo aplica si no hay un mapa de color activo (para no alterar colores térmicos/médicos)
@@ -457,6 +481,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 // If not grayscale (colored overlay), preserve original RGB values
             }
             ctx.putImageData(imageData, 0, 0);
+        }
+
+        // 4b. INVERTIR (solo píxeles en escala de grises, preserva overlays de color)
+        if (viewTransforms.invert) {
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const d = imgData.data;
+            for (let i = 0; i < d.length; i += 4) {
+                if (d[i] === d[i+1] && d[i+1] === d[i+2]) {
+                    d[i] = d[i+1] = d[i+2] = 255 - d[i];
+                }
+            }
+            ctx.putImageData(imgData, 0, 0);
         }
 
         // 5. SINCRONIZAR CAPAS (Imagen + Herramientas)
@@ -481,6 +517,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         updateMinimap(view);
+        drawReferenceLines();
     }
     
     // --- LÓGICA DEL HISTOGRAMA ---
@@ -871,8 +908,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const token = document.querySelector('meta[name="csrf-token"]').content;
             const loader = document.getElementById('loader-wrapper');
             const submitBtn = this.querySelector('button[type="submit"]');
-            const iframe = document.getElementById('DicomRender');
-
             // Feedback visual: mostrar carga y deshabilitar botón
             if (loader) { loader.style.display = 'flex'; loader.style.opacity = '1'; }
             if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Procesando...'; }
@@ -885,13 +920,8 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
-                    // ÉXITO: Forzamos actualización del iframe 3D
                     console.log("RT cargado:", data.message);
-                    if (iframe) {
-                        // Truco del timestamp para obligar al navegador a redibujar
-                        const currentSrc = iframe.src.split('?')[0];
-                        iframe.src = currentSrc + '?t=' + new Date().getTime();
-                    }
+                    window.refresh3dImage?.();
                     alert("Segmentación cargada correctamente.");
                 } else {
                     // ERROR CONTROLADO (Backend dijo que no pudo)
@@ -919,59 +949,271 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // --- LÓGICA DE CAMBIO DE RENDERIZADO 3D Y COLOR ---
-    function setup3DRendererControls() {
-        const renderModeRadios = document.querySelectorAll('input[name="renderMode"]');
-        const colormapSelect = document.getElementById('colormapSelect'); // <--- Nuevo ID
-        const iframe = document.getElementById('DicomRender');
-        
-        if (!iframe) return;
+    // --- VISOR 3D: Three.js (isosurface) + PNG (volume/MIP) ---
 
-        // Función para enviar cambios al servidor 3D
-        const updateServer3D = () => {
-            iframe.style.opacity = '0.5'; 
-            
-            const activeRadio = document.querySelector('input[name="renderMode"]:checked');
-            const mode = activeRadio ? activeRadio.value : 'volume';
-            const cmap = viewState.colormap;
+    let current3dView   = 'isometric';
+    let _threejsState   = null;   // { renderer, scene, camera, controls, animId }
 
-            const token = document.querySelector('meta[name="csrf-token"]').content;
-            
-            fetch('/update_render_mode', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
-                body: JSON.stringify({ mode: mode, cmap: cmap })
+    /** Destruye la escena Three.js anterior si existe. */
+    function _destroyThreejs() {
+        if (!_threejsState) return;
+        const { renderer, controls, animId } = _threejsState;
+        cancelAnimationFrame(animId);
+        controls.dispose();
+        renderer.dispose();
+        const c = renderer.domElement;
+        if (c.parentNode) c.parentNode.removeChild(c);
+        _threejsState = null;
+    }
+
+    /** Convierte base64 → ArrayBuffer. */
+    function _b64toBuffer(b64) {
+        const bin = atob(b64);
+        const buf = new ArrayBuffer(bin.length);
+        const u8  = new Uint8Array(buf);
+        for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+        return buf;
+    }
+
+    /** Inicializa Three.js en #threejs-container con los datos de mallas recibidos. */
+    function _initThreejs(meshesData) {
+        _destroyThreejs();
+
+        const container = document.getElementById('threejs-container');
+        if (!container || typeof THREE === 'undefined') return;
+
+        const W = container.clientWidth  || 400;
+        const H = container.clientHeight || 500;
+
+        // Renderer
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(W, H);
+        renderer.setClearColor(0x0a0e17, 1);
+        container.appendChild(renderer.domElement);
+
+        // Escena y cámara
+        const scene  = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 100000);
+
+        // Luces
+        scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+        const dir1 = new THREE.DirectionalLight(0xffffff, 0.75);
+        dir1.position.set(1, 2, 2);
+        scene.add(dir1);
+        const dir2 = new THREE.DirectionalLight(0x6688cc, 0.3);
+        dir2.position.set(-2, -1, -1);
+        scene.add(dir2);
+
+        // Mallas
+        const box = new THREE.Box3();
+        for (const md of meshesData) {
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position',
+                new THREE.BufferAttribute(new Float32Array(_b64toBuffer(md.vertices)), 3));
+            geo.setIndex(
+                new THREE.BufferAttribute(new Uint32Array(_b64toBuffer(md.faces)), 1));
+            geo.computeVertexNormals();
+            box.expandByObject(new THREE.Mesh(geo));
+
+            const mat = new THREE.MeshPhongMaterial({
+                color:       new THREE.Color(md.color),
+                opacity:     md.opacity,
+                transparent: md.opacity < 0.99,
+                side:        THREE.DoubleSide,
+                shininess:   60,
+            });
+            scene.add(new THREE.Mesh(geo, mat));
+        }
+
+        // Centrar cámara en el bounding box de la escena
+        const center = new THREE.Vector3();
+        const size   = new THREE.Vector3();
+        box.getCenter(center);
+        box.getSize(size);
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const dist   = maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(22.5)));
+        camera.position.set(center.x + dist * 0.6, center.y + dist * 0.4, center.z + dist);
+        camera.lookAt(center);
+        camera.near = dist * 0.01;
+        camera.far  = dist * 10;
+        camera.updateProjectionMatrix();
+
+        // OrbitControls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.target.copy(center);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.update();
+
+        // Resize observer
+        const ro = new ResizeObserver(() => {
+            const nW = container.clientWidth;
+            const nH = container.clientHeight;
+            if (!nW || !nH) return;
+            renderer.setSize(nW, nH);
+            camera.aspect = nW / nH;
+            camera.updateProjectionMatrix();
+        });
+        ro.observe(container);
+
+        // Loop de animación
+        let animId;
+        function animate() {
+            animId = requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        _threejsState = { renderer, scene, camera, controls, animId, ro };
+    }
+
+    /** Muestra el visor Three.js, oculta controles PNG. */
+    function _showThreejs() {
+        document.getElementById('threejs-container')?.style.setProperty('display', 'block');
+        document.getElementById('png-container')?.style.setProperty('display', 'none');
+        document.getElementById('png-view-btns')?.style.setProperty('display', 'none');
+        const hint = document.getElementById('threejs-hint');
+        if (hint) hint.style.display = 'inline';
+    }
+
+    /** Muestra el visor PNG con botones de vista; destruye Three.js si existía. */
+    function _showPng() {
+        _destroyThreejs();
+        document.getElementById('threejs-container')?.style.setProperty('display', 'none');
+        document.getElementById('png-container')?.style.setProperty('display', 'block');
+        document.getElementById('png-view-btns')?.style.setProperty('display', 'flex');
+        const hint = document.getElementById('threejs-hint');
+        if (hint) hint.style.display = 'none';
+    }
+
+    /** Recarga el visor 3D activo (Three.js si es isosurface, PNG si es volume/MIP). */
+    window.refresh3dImage = function() {
+        if (_threejsState) {
+            fetch('/render_3d_meshes')
+                .then(r => r.json())
+                .then(meshData => {
+                    if (meshData.mode === 'isosurface' && meshData.meshes?.length) {
+                        _initThreejs(meshData.meshes);
+                    }
+                })
+                .catch(e => console.error('refresh3dImage mesh error:', e));
+            return;
+        }
+        const img     = document.getElementById('DicomRender');
+        const spinner = document.getElementById('render3dSpinner');
+        if (!img) return;
+        spinner?.classList.remove('d-none');
+        img.style.opacity = '0.4';
+        const src = `/render_3d_frame?view=${current3dView}&t=${Date.now()}`;
+        const tmp = new Image();
+        tmp.onload  = () => { img.src = src; img.style.opacity = '1'; spinner?.classList.add('d-none'); };
+        tmp.onerror = () => { img.style.opacity = '1'; spinner?.classList.add('d-none'); };
+        tmp.src = src;
+    };
+
+    /** Carga o recarga la vista 3D: Three.js para isosurface, PNG para volume/MIP. */
+    function load3dContent(mode) {
+        const token = document.querySelector('meta[name="csrf-token"]')?.content;
+        fetch('/update_render_mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+            body: JSON.stringify({ mode, cmap: viewState.colormap })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'success') return;
+            if (mode === 'isosurface') {
+                _tryLoadThreejs();
+            } else {
+                _showPng();
+                window.refresh3dImage();
+            }
+        })
+        .catch(e => console.error('load3dContent error:', e));
+    }
+
+    /** Intenta cargar Three.js; si falla o no hay mallas, muestra PNG. */
+    function _tryLoadThreejs() {
+        if (typeof THREE === 'undefined' || typeof THREE.OrbitControls === 'undefined') {
+            console.warn('Three.js no disponible — usando visor PNG');
+            _showPng();
+            window.refresh3dImage();
+            return;
+        }
+        fetch('/render_3d_meshes')
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
             })
-            .then(response => response.json())
-            .then(data => {
-                if(data.status === 'success') { 
-                    // Recargar iframe solo si es necesario
-                    iframe.src = iframe.src.split('?')[0] + '?t=' + new Date().getTime(); 
+            .then(meshData => {
+                console.log('render_3d_meshes:', meshData.mode,
+                            'mallas:', meshData.meshes?.length ?? 0);
+                if (meshData.mode === 'isosurface' && meshData.meshes?.length) {
+                    _showThreejs();
+                    _initThreejs(meshData.meshes);
+                } else {
+                    _showPng();
+                    window.refresh3dImage();
                 }
             })
-            .finally(() => { setTimeout(() => { iframe.style.opacity = '1'; }, 1000); });
-        };
+            .catch(e => {
+                console.error('render_3d_meshes error:', e);
+                _showPng();
+                window.refresh3dImage();
+            });
+    }
 
-        // Cambio de MODO 3D (Recarga el iframe)
+    function setup3DRendererControls() {
+        const renderModeRadios = document.querySelectorAll('input[name="renderMode"]');
+        const colormapSelect   = document.getElementById('colormapSelect');
+
+        if (!document.getElementById('threejs-container') &&
+            !document.getElementById('DicomRender')) return;
+
+        // Cambio de modo 3D
         renderModeRadios.forEach(radio => {
-            radio.addEventListener('change', updateServer3D);
+            radio.addEventListener('change', () => load3dContent(radio.value));
         });
 
-        // Listener Dropdown Color
-        if (colormapSelect) {
-            colormapSelect.addEventListener('change', function() {
-                viewState.colormap = this.value;
-                
-                // 1. Actualizar vistas 2D (inmediato)
-                VIEWS.forEach(view => {
-                    const slider = document.getElementById(`slider_${view}`);
-                    if (slider) updateImage(view, slider.value, true);
-                });
-
-                // NO llamamos a updateServer() aquí. 
-                // El 3D se actualizará solo cuando cambies de modo (MIP/ISO) o rotes la imagen.
+        // Botones de vista PNG
+        document.querySelectorAll('.view3d-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.view3d-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                current3dView = btn.dataset.view || 'isometric';
+                window.refresh3dImage();
             });
+        });
+
+        // Botón refrescar
+        document.getElementById('refresh3dBtn')?.addEventListener('click', () => {
+            const activeRadio = document.querySelector('input[name="renderMode"]:checked');
+            load3dContent(activeRadio?.value || 'isosurface');
+        });
+
+        // Colormap: 2D inmediato + 3D actualizado
+        colormapSelect?.addEventListener('change', function () {
+            viewState.colormap = this.value;
+            VIEWS.forEach(view => {
+                const slider = document.getElementById(`slider_${view}`);
+                if (slider) updateImage(view, slider.value, true);
+            });
+            load3dContent(
+                document.querySelector('input[name="renderMode"]:checked')?.value || 'isosurface'
+            );
+        });
+
+        // Carga inicial
+        const initMode = (typeof CURRENT_RENDER_MODE !== 'undefined')
+            ? CURRENT_RENDER_MODE : 'isosurface';
+        if (initMode === 'isosurface') {
+            _tryLoadThreejs();
+        } else {
+            _showPng();
         }
+        // Para volume/mip el img src="/render_3d_frame" ya está en el HTML → se carga solo
     }
 
     // --- LÓGICA DE ZOOM Y PANEO ---
@@ -985,14 +1227,15 @@ document.addEventListener('DOMContentLoaded', function() {
         const updateTransform = () => {
             const zs = zoomState[view];
             const transform = `translate(${zs.panX}px, ${zs.panY}px) scale(${zs.scale})`;
-            
+
             // Aplicamos transformación a la imagen Y al dibujo (overlay)
             canvas.style.transform = transform;
-            canvas.style.transformOrigin = '0 0'; 
+            canvas.style.transformOrigin = '0 0';
             overlay.style.transform = transform;
             overlay.style.transformOrigin = '0 0';
             // --- NUEVO: Actualizar el mini-mapa al mover o hacer zoom ---
             updateMinimap(view);
+            drawReferenceLines();
         };
 
         // ZOOM (Rueda del mouse)
@@ -1028,10 +1271,48 @@ document.addEventListener('DOMContentLoaded', function() {
         let startX, startY;
         let initialPanX, initialPanY;
 
+        // W/L drag state (clic derecho)
+        let wlDown = false;
+        let wlStart = { x: 0, y: 0, ww: 400, wc: 40 };
+
+        // Crosshair drag state
+        let crosshairDown = false;
+
+        // Evitar menú contextual sobre la imagen
+        wrapper.addEventListener('contextmenu', e => e.preventDefault());
+
         wrapper.addEventListener('mousedown', (e) => {
-            // Disable panning when inspector mode or segmentation mode is active
+            // --- CLIC DERECHO: arranca W/L drag ---
+            if (e.button === 2) {
+                wlDown = true;
+                wlStart = { x: e.clientX, y: e.clientY, ww: viewState.ww, wc: viewState.wc };
+                wrapper.style.cursor = 'col-resize';
+                e.preventDefault();
+                return;
+            }
+
             if (viewState.inspectorMode || viewState.segmentationMode) return;
 
+            // --- MODO CROSSHAIR: clic izquierdo actualiza el crosshair ---
+            if (viewState.crosshairMode) {
+                crosshairDown = true;
+                moveCrosshair(view, e);
+                return;
+            }
+
+            // --- MODO REGLA: primer clic fija ptA, arrastre dibuja, mouseup fija ptB ---
+            if (viewState.rulerMode) {
+                const mapped = cssToPngPixels(canvas, e);
+                if (mapped) {
+                    rulerState.ptA = { x: mapped.xPix, y: mapped.yPix };
+                    rulerState.ptB = null;
+                    rulerState.view = view;
+                    rulerState.drawing = true;
+                }
+                return;
+            }
+
+            // --- MODO NORMAL: pan ---
             isDown = true;
             zoomState[view].isDragging = false;
 
@@ -1047,10 +1328,33 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         window.addEventListener('mousemove', (e) => {
+            // W/L drag (clic derecho)
+            if (wlDown) {
+                const dx = e.clientX - wlStart.x;
+                const dy = e.clientY - wlStart.y;
+                const sens = Math.max(1.5, wlStart.ww / 150);
+                const newWW = Math.max(1, Math.round(wlStart.ww + dx * sens));
+                const newWC = Math.round(wlStart.wc - dy * (sens * 0.55));
+                updateWWWC(newWW, newWC, 'drag');
+                return;
+            }
+
+            // Crosshair drag
+            if (crosshairDown) {
+                moveCrosshair(view, e);
+                return;
+            }
+
+            // Ruler preview
+            if (rulerState.drawing && rulerState.view === view && rulerState.ptA) {
+                const mapped = cssToPngPixels(canvas, e);
+                if (mapped) drawRulerPreview(view, rulerState.ptA, { x: mapped.xPix, y: mapped.yPix });
+                return;
+            }
+
             if (!isDown) return;
             e.preventDefault();
-            
-            // Calculamos cuánto se movió el mouse
+
             const dx = e.clientX - startX;
             const dy = e.clientY - startY;
 
@@ -1060,17 +1364,38 @@ document.addEventListener('DOMContentLoaded', function() {
 
             zoomState[view].panX = initialPanX + dx;
             zoomState[view].panY = initialPanY + dy;
-            
+
             updateTransform();
         });
 
-        window.addEventListener('mouseup', () => {
+        window.addEventListener('mouseup', (e) => {
+            if (wlDown && e.button === 2) {
+                wlDown = false;
+                const cur = viewState.crosshairMode ? 'crosshair' : 'grab';
+                wrapper.style.cursor = cur;
+                return;
+            }
+            if (crosshairDown) {
+                crosshairDown = false;
+                return;
+            }
+            // Finalizar regla
+            if (rulerState.drawing && rulerState.view === view) {
+                const mapped = cssToPngPixels(canvas, e);
+                if (mapped && rulerState.ptA) {
+                    rulerState.ptB = { x: mapped.xPix, y: mapped.yPix };
+                    rulerState.drawing = false;
+                    drawRulerFinal(view, rulerState.ptA, rulerState.ptB);
+                }
+                return;
+            }
             isDown = false;
-            // Only restore grab cursor if not in inspector mode or segmentation mode
             if (!viewState.inspectorMode && !viewState.segmentationMode) {
-                wrapper.style.cursor = 'grab';
-                canvas.style.cursor = 'grab';
-                overlay.style.cursor = 'grab';
+                const cur = viewState.crosshairMode ? 'crosshair' :
+                            viewState.rulerMode ? 'crosshair' : 'grab';
+                wrapper.style.cursor = cur;
+                canvas.style.cursor = cur;
+                overlay.style.cursor = cur;
             }
 
             setTimeout(() => {
@@ -1125,10 +1450,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     
                     if (canvas) canvas.style.transform = transform;
                     if (overlay) overlay.style.transform = transform;
-                    
+
                     updateMinimap(targetView);
                 }
             });
+            drawReferenceLines();
         }
     }
 
@@ -2138,9 +2464,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (slider) updateImage(view, slider.value, true);
                     });
                     
-                    // Forzar recarga del modelo 3D (si existe)
-                    const iframe = document.getElementById('DicomRender');
-                    if (iframe) iframe.src = iframe.src.split('?')[0] + '?t=' + new Date().getTime();
+                    // Forzar recarga del modelo 3D
+                    window.refresh3dImage?.();
                 } else {
                     alert("⚠️ Error en IA: " + data.message);
                 }
@@ -2190,24 +2515,6 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             tableBody.innerHTML = '<tr><td colspan="2" class="text-center text-danger">Error cargando información.</td></tr>';
             console.error(error);
-        }
-    }
-
-    // --- Lógica para iluminar botones de presets ---
-    function highlightPreset(activeId) {
-        ['presetBtnLung', 'presetBtnBone', 'presetBtnSoftTissue'].forEach(id => {
-            const btn = document.getElementById(id);
-            if (btn) {
-                btn.classList.remove('preset-active');
-                btn.classList.add('btn-outline-secondary');
-            }
-        });
-        if (activeId) {
-            const btn = document.getElementById(activeId);
-            if (btn) {
-                btn.classList.remove('btn-outline-secondary');
-                btn.classList.add('preset-active');
-            }
         }
     }
 
@@ -2378,6 +2685,364 @@ document.addEventListener('DOMContentLoaded', function() {
         else if (view === 'sagital') { px = v.y; py = v.z * s.sagittal; }
 
         drawCrosshair(view, px, py);
+    }
+
+    // --- MODO CROSSHAIR (VISTAS ENLAZADAS) ---
+    function moveCrosshair(view, e) {
+        const mainCanvas = document.getElementById(`canvas_${view}`);
+        if (!mainCanvas) return;
+        const mapped = cssToPngPixels(mainCanvas, e);
+        if (!mapped) return;
+
+        const slider = document.getElementById(`slider_${view}`);
+        if (!slider) return;
+        const idx = parseInt(slider.value, 10);
+
+        fetch(`/hu_value?view=${view}&x=${mapped.xPix}&y=${mapped.yPix}&index=${idx}`)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.error && data.voxel) {
+                    if (data.scales) viewState.scales = data.scales;
+                    crosshairState.x = data.voxel.x;
+                    crosshairState.y = data.voxel.y;
+                    crosshairState.z = data.voxel.z;
+                    syncViewsFromVoxel(view, data.voxel);
+                }
+            })
+            .catch(err => console.warn('moveCrosshair error:', err));
+    }
+
+    // --- CINE PLAYBACK ---
+    function cineTick() {
+        const views = CINE.view === 'all' ? ['axial', 'sagital', 'coronal'] : [CINE.view];
+        let anySliderExists = false;
+
+        views.forEach(view => {
+            const slider = document.getElementById(`slider_${view}`);
+            const number = document.getElementById(`number_${view}`);
+            if (!slider) return;
+            anySliderExists = true;
+
+            let val = parseInt(slider.value, 10) + 1;
+            const max = parseInt(slider.max, 10);
+
+            if (val > max) {
+                val = CINE.loop ? 0 : max;
+            }
+
+            slider.value = val;
+            if (number) number.value = val;
+            updateImage(view, val, true);
+        });
+
+        if (!CINE.loop && anySliderExists) {
+            const allAtEnd = views.every(view => {
+                const s = document.getElementById(`slider_${view}`);
+                return s && parseInt(s.value, 10) >= parseInt(s.max, 10);
+            });
+            if (allAtEnd) stopCine();
+        }
+    }
+
+    function startCine() {
+        if (CINE._id) clearInterval(CINE._id);
+        CINE.active = true;
+        CINE._id = setInterval(cineTick, Math.round(1000 / CINE.fps));
+        const icon = document.getElementById('cinePlayIcon');
+        if (icon) icon.className = 'bi bi-pause-fill';
+    }
+
+    function stopCine() {
+        if (CINE._id) { clearInterval(CINE._id); CINE._id = null; }
+        CINE.active = false;
+        const icon = document.getElementById('cinePlayIcon');
+        if (icon) icon.className = 'bi bi-play-fill';
+    }
+
+    function toggleCine() {
+        if (CINE.active) stopCine(); else startCine();
+    }
+
+    // --- BOTÓN CROSSHAIR ---
+    setupPluginButton('crosshairBtn', null, (isActive) => {
+        viewState.crosshairMode = isActive;
+        if (isActive) {
+            updateCursorStyle('crosshair');
+        } else {
+            updateCursorStyle('grab');
+            VIEWS.forEach(v => clearOverlay(v));
+        }
+    });
+
+    // --- CONTROLES CINE ---
+    document.getElementById('cineBtn')?.addEventListener('click', () => {
+        const bar = document.getElementById('cine-bar');
+        const btn = document.getElementById('cineBtn');
+        if (!bar) return;
+        if (bar.classList.contains('d-none')) {
+            bar.classList.remove('d-none');
+            btn?.classList.add('btn-udg-rojo');
+        } else {
+            bar.classList.add('d-none');
+            btn?.classList.remove('btn-udg-rojo');
+            stopCine();
+        }
+    });
+
+    document.getElementById('cinePlayBtn')?.addEventListener('click', toggleCine);
+
+    document.getElementById('cinePrevBtn')?.addEventListener('click', () => {
+        stopCine();
+        const targets = CINE.view === 'all' ? ['axial', 'sagital', 'coronal'] : [CINE.view];
+        targets.forEach(v => {
+            const slider = document.getElementById(`slider_${v}`);
+            const number = document.getElementById(`number_${v}`);
+            if (slider) { slider.value = 0; if (number) number.value = 0; updateImage(v, 0, true); }
+        });
+    });
+
+    document.getElementById('cineNextBtn')?.addEventListener('click', () => {
+        stopCine();
+        const targets = CINE.view === 'all' ? ['axial', 'sagital', 'coronal'] : [CINE.view];
+        targets.forEach(v => {
+            const slider = document.getElementById(`slider_${v}`);
+            const number = document.getElementById(`number_${v}`);
+            if (slider) {
+                const max = parseInt(slider.max, 10);
+                slider.value = max; if (number) number.value = max; updateImage(v, max, true);
+            }
+        });
+    });
+
+    document.getElementById('cineViewSelect')?.addEventListener('change', (e) => {
+        CINE.view = e.target.value;
+        if (CINE.active) startCine();
+    });
+
+    document.getElementById('cineFpsSlider')?.addEventListener('input', (e) => {
+        CINE.fps = parseInt(e.target.value, 10);
+        const display = document.getElementById('cineFpsDisplay');
+        if (display) display.textContent = CINE.fps;
+        if (CINE.active) startCine();
+    });
+
+    document.getElementById('cineLoopCheck')?.addEventListener('change', (e) => {
+        CINE.loop = e.target.checked;
+    });
+
+    // --- FLIP / INVERT ---
+    function redrawAllViews() {
+        VIEWS.forEach(v => {
+            if (v !== '3D') applyLutAndDraw(v);
+        });
+    }
+
+    document.getElementById('invertBtn')?.addEventListener('click', () => {
+        viewTransforms.invert = !viewTransforms.invert;
+        document.getElementById('invertBtn')?.classList.toggle('btn-udg-rojo', viewTransforms.invert);
+        redrawAllViews();
+    });
+
+    document.getElementById('flipHBtn')?.addEventListener('click', () => {
+        viewTransforms.flipH = !viewTransforms.flipH;
+        document.getElementById('flipHBtn')?.classList.toggle('btn-udg-rojo', viewTransforms.flipH);
+        redrawAllViews();
+    });
+
+    document.getElementById('flipVBtn')?.addEventListener('click', () => {
+        viewTransforms.flipV = !viewTransforms.flipV;
+        document.getElementById('flipVBtn')?.classList.toggle('btn-udg-rojo', viewTransforms.flipV);
+        redrawAllViews();
+    });
+
+    // --- RESET VIEW ---
+    document.getElementById('resetViewBtn')?.addEventListener('click', () => {
+        VIEWS.forEach(v => {
+            if (v === '3D') return;
+            zoomState[v] = { scale: 1, panX: 0, panY: 0, isDragging: false };
+            applyLutAndDraw(v);
+        });
+    });
+
+    // --- SCREENSHOT (composite PNG de las 3 vistas) ---
+    document.getElementById('screenshotBtn')?.addEventListener('click', () => {
+        const gap = 8;
+        const canvases = ['axial', 'sagital', 'coronal'].map(v => document.getElementById(`canvas_${v}`)).filter(Boolean);
+        if (canvases.length === 0) return;
+
+        const h = Math.max(...canvases.map(c => c.height));
+        const totalW = canvases.reduce((acc, c) => acc + c.width, 0) + gap * (canvases.length - 1);
+
+        const out = document.createElement('canvas');
+        out.width = totalW;
+        out.height = h;
+        const ctx = out.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, totalW, h);
+
+        let offsetX = 0;
+        canvases.forEach(c => {
+            const offsetY = Math.round((h - c.height) / 2);
+            ctx.drawImage(c, offsetX, offsetY);
+            offsetX += c.width + gap;
+        });
+
+        const a = document.createElement('a');
+        a.download = `dicom_viewer_${Date.now()}.png`;
+        a.href = out.toDataURL('image/png');
+        a.click();
+    });
+
+    // --- REGLA (RULER) ---
+    function _rulerMmPerPixel(view) {
+        const sp = (typeof DICOM_SPACING !== 'undefined') ? DICOM_SPACING : { dx: 1, dy: 1, dz: 1 };
+        if (view === 'axial')   return { px: sp.dx, py: sp.dy };
+        if (view === 'coronal') return { px: sp.dx, py: sp.dx };
+        return { px: sp.dy, py: sp.dx }; // sagital
+    }
+
+    function drawRulerPreview(view, ptA, ptB) {
+        const ov = document.getElementById(`overlay_${view}`);
+        const cv = document.getElementById(`canvas_${view}`);
+        if (!ov || !cv) return;
+        if (ov.width !== cv.width || ov.height !== cv.height) {
+            ov.width = cv.width; ov.height = cv.height;
+        }
+        const ctx = ov.getContext('2d');
+        ctx.clearRect(0, 0, ov.width, ov.height);
+
+        const zs = zoomState[view];
+        ctx.save();
+        ctx.strokeStyle = '#FFD700';
+        ctx.lineWidth = 1.5 / zs.scale;
+        ctx.setLineDash([4 / zs.scale, 2 / zs.scale]);
+        ctx.beginPath();
+        ctx.moveTo(ptA.x, ptA.y);
+        ctx.lineTo(ptB.x, ptB.y);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawRulerFinal(view, ptA, ptB) {
+        const ov = document.getElementById(`overlay_${view}`);
+        const cv = document.getElementById(`canvas_${view}`);
+        if (!ov || !cv) return;
+        if (ov.width !== cv.width || ov.height !== cv.height) {
+            ov.width = cv.width; ov.height = cv.height;
+        }
+        const ctx = ov.getContext('2d');
+        ctx.clearRect(0, 0, ov.width, ov.height);
+
+        const zs = zoomState[view];
+        const mmp = _rulerMmPerPixel(view);
+        const dx = ptB.x - ptA.x;
+        const dy = ptB.y - ptA.y;
+        const distMm = Math.sqrt((dx * mmp.px) ** 2 + (dy * mmp.py) ** 2);
+        const label = `${distMm.toFixed(1)} mm`;
+
+        ctx.save();
+        ctx.strokeStyle = '#FFD700';
+        ctx.lineWidth = 1.5 / zs.scale;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(ptA.x, ptA.y);
+        ctx.lineTo(ptB.x, ptB.y);
+        ctx.stroke();
+
+        // Ticks en extremos
+        const angle = Math.atan2(dy, dx);
+        const tickLen = 5 / zs.scale;
+        [ptA, ptB].forEach(pt => {
+            ctx.beginPath();
+            ctx.moveTo(pt.x + Math.sin(angle) * tickLen, pt.y - Math.cos(angle) * tickLen);
+            ctx.lineTo(pt.x - Math.sin(angle) * tickLen, pt.y + Math.cos(angle) * tickLen);
+            ctx.stroke();
+        });
+
+        // Etiqueta con fondo
+        const midX = (ptA.x + ptB.x) / 2;
+        const midY = (ptA.y + ptB.y) / 2 - 6 / zs.scale;
+        const fontSize = Math.max(9, 13 / zs.scale);
+        ctx.font = `bold ${fontSize}px monospace`;
+        ctx.setLineDash([]);
+        const tw = ctx.measureText(label).width;
+        const pad = 3 / zs.scale;
+        ctx.fillStyle = 'rgba(0,0,0,0.65)';
+        ctx.fillRect(midX - tw / 2 - pad, midY - fontSize, tw + pad * 2, fontSize + pad * 2);
+        ctx.fillStyle = '#FFD700';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(label, midX, midY);
+        ctx.restore();
+    }
+
+    setupPluginButton('rulerBtn', null, (isActive) => {
+        viewState.rulerMode = isActive;
+        if (isActive) {
+            updateCursorStyle('crosshair');
+        } else {
+            updateCursorStyle('grab');
+            rulerState.ptA = null; rulerState.ptB = null; rulerState.drawing = false;
+            VIEWS.forEach(v => { if (v !== '3D') clearOverlay(v); });
+        }
+    });
+
+    // --- LÍNEAS DE REFERENCIA (se actualizan con cada cambio de slider o zoom) ---
+    function setRefLine(view, pixelX, pixelY) {
+        const zs = zoomState[view];
+        const chH = document.getElementById(`ch_h_${view}`);
+        const chV = document.getElementById(`ch_v_${view}`);
+        if (chH) {
+            chH.style.display = 'block';
+            chH.style.top = (zs.panY + pixelY * zs.scale) + 'px';
+        }
+        if (chV) {
+            chV.style.display = 'block';
+            chV.style.left = (zs.panX + pixelX * zs.scale) + 'px';
+        }
+    }
+
+    function drawReferenceLines() {
+        const slVal = (id) => parseInt(document.getElementById(id)?.value  || 0, 10);
+        const slMax = (id) => parseInt(document.getElementById(id)?.max    || 0, 10) + 1;
+
+        const z    = slVal('slider_axial');
+        const y    = slVal('slider_coronal');
+        const x    = slVal('slider_sagital');
+        const maxZ = slMax('slider_axial');
+        const maxY = slMax('slider_coronal');
+        const maxX = slMax('slider_sagital');
+
+        // Guard: datos no cargados todavía
+        if (maxZ <= 1 || maxY <= 1 || maxX <= 1) return;
+
+        const cAx = document.getElementById('canvas_axial');
+        const cCo = document.getElementById('canvas_coronal');
+        const cSa = document.getElementById('canvas_sagital');
+
+        // Axial (ancho≈X voxels, alto≈Y voxels)
+        //   V = dónde está el corte sagital  →  col x
+        //   H = dónde está el corte coronal  →  fila y
+        if (cAx && cAx.width > 0 && cAx.height > 0)
+            setRefLine('axial',
+                Math.round(x * cAx.width  / maxX),
+                Math.round(y * cAx.height / maxY));
+
+        // Coronal (ancho≈X voxels, alto≈Z*escala)
+        //   V = dónde está el corte sagital  →  col x
+        //   H = dónde está el corte axial    →  fila z
+        if (cCo && cCo.width > 0 && cCo.height > 0)
+            setRefLine('coronal',
+                Math.round(x * cCo.width  / maxX),
+                Math.round(z * cCo.height / maxZ));
+
+        // Sagital (ancho≈Y voxels, alto≈Z*escala)
+        //   V = dónde está el corte coronal  →  col y
+        //   H = dónde está el corte axial    →  fila z
+        if (cSa && cSa.width > 0 && cSa.height > 0)
+            setRefLine('sagital',
+                Math.round(y * cSa.width  / maxY),
+                Math.round(z * cSa.height / maxZ));
     }
 });
 

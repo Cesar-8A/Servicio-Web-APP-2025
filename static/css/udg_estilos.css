@@ -520,9 +520,139 @@ input[type="file"]:focus::file-selector-button {
 .btn-group-presets .btn { flex: 1; border-radius: 0; border-color: var(--gris-borde); color: var(--gris-debil); }
 .btn-group-presets .btn:first-child { border-radius: 4px 0 0 4px; }
 .btn-group-presets .btn:last-child { border-radius: 0 4px 4px 0; }
-.preset-active {
-    background-color: var(--color-primario) !important; border-color: var(--color-primario) !important;
-    color: white !important; font-weight: bold; box-shadow: inset 0 3px 5px rgba(0,0,0,0.2);
+.btn-xs { padding: 1px 6px; font-size: 0.7rem; line-height: 1.4; border-radius: 3px; }
+
+/* --- Visor 3D PNG --- */
+.render3d-wrapper { overflow: hidden; }
+.render3d-toolbar .view3d-btn { padding: 2px 7px; font-size: 0.72rem; }
+.render3d-toolbar .view3d-btn.active {
+    background-color: var(--color-primario);
+    border-color: var(--color-primario);
+    color: #fff;
+}
+.render3d-toolbar .view3d-btn:not(.active):hover { border-color: var(--color-primario); color: var(--color-primario); }
+
+/* --- Preset Cards (panel Brillo/Contraste) --- */
+.preset-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+.preset-card {
+    cursor: pointer;
+    background: rgba(13, 110, 253, 0.07);
+    border: 1px solid rgba(13, 110, 253, 0.22);
+    border-radius: 8px;
+    padding: 9px 6px 7px;
+    text-align: center;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.12s, color 0.15s;
+    color: var(--gris-debil);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    line-height: 1;
+}
+.preset-card:hover {
+    background: rgba(13, 110, 253, 0.2);
+    border-color: var(--color-primario);
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(13, 110, 253, 0.22);
+}
+.preset-card.preset-active {
+    background: rgba(13, 110, 253, 0.32) !important;
+    border-color: var(--color-primario) !important;
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.5), 0 0 16px rgba(13, 110, 253, 0.35) !important;
+    color: white !important;
+}
+.preset-card-full {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 9px 12px;
+    gap: 0;
+}
+.preset-card-accent {
+    border-color: rgba(255, 193, 7, 0.32) !important;
+    background: rgba(255, 193, 7, 0.06) !important;
+}
+.preset-card-accent:hover {
+    border-color: var(--amarillo-UDG) !important;
+    background: rgba(255, 193, 7, 0.16) !important;
+    color: var(--amarillo-UDG) !important;
+    box-shadow: 0 0 12px rgba(255, 193, 7, 0.28) !important;
+}
+.preset-card-accent.preset-active {
+    background: rgba(255, 193, 7, 0.22) !important;
+    border-color: var(--amarillo-UDG) !important;
+    box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.45), 0 0 18px rgba(255, 193, 7, 0.35) !important;
+    color: var(--amarillo-UDG) !important;
+}
+.preset-icon { font-size: 1.15rem; }
+.preset-name { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.2px; }
+.preset-values { font-size: 0.58rem; font-family: monospace; opacity: 0.7; }
+.preset-key {
+    display: inline-block;
+    font-size: 0.58rem;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 3px;
+    padding: 0 4px;
+    line-height: 1.5;
+    font-family: monospace;
+    margin-top: 1px;
+}
+
+/* --- Preset Pills (panel Histograma) --- */
+.preset-pills-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+.preset-pill {
+    flex: 1;
+    min-width: calc(50% - 5px);
+    cursor: pointer;
+    background: rgba(13, 110, 253, 0.07);
+    border: 1px solid rgba(13, 110, 253, 0.22);
+    border-radius: 5px;
+    padding: 4px 6px;
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--gris-debil);
+    transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+    text-align: center;
+    white-space: nowrap;
+}
+.preset-pill:hover {
+    background: rgba(13, 110, 253, 0.2);
+    border-color: var(--color-primario);
+    color: white;
+}
+.preset-pill.preset-active {
+    background: rgba(13, 110, 253, 0.3) !important;
+    border-color: var(--color-primario) !important;
+    color: white !important;
+    box-shadow: 0 0 0 1px rgba(13, 110, 253, 0.4), 0 0 8px rgba(13, 110, 253, 0.3) !important;
+    font-weight: 700;
+}
+.preset-pill-accent {
+    border-color: rgba(255, 193, 7, 0.3) !important;
+    background: rgba(255, 193, 7, 0.05) !important;
+}
+.preset-pill-accent:hover {
+    border-color: var(--amarillo-UDG) !important;
+    background: rgba(255, 193, 7, 0.15) !important;
+    color: var(--amarillo-UDG) !important;
+}
+.preset-pill-accent.preset-active {
+    background: rgba(255, 193, 7, 0.2) !important;
+    border-color: var(--amarillo-UDG) !important;
+    color: var(--amarillo-UDG) !important;
+    box-shadow: 0 0 0 1px rgba(255, 193, 7, 0.4), 0 0 8px rgba(255, 193, 7, 0.3) !important;
+    font-weight: 700;
 }
 
 /* Spinners Num├⌐ricos */
@@ -698,4 +828,43 @@ input[type="file"]:focus::file-selector-button {
     z-index: 20;
     border-radius: 4px;
     pointer-events: none;
+}
+
+/* --- Líneas de Referencia (siempre visibles, siguen al slider) --- */
+.ch-h, .ch-v {
+    position: absolute;
+    pointer-events: none;
+    display: none;
+    z-index: 10;
+    transition: top 0.05s linear, left 0.05s linear;
+}
+.ch-h {
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: rgba(0, 220, 220, 0.7);
+    box-shadow: 0 0 4px rgba(0, 220, 220, 0.4);
+}
+.ch-v {
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: rgba(0, 220, 220, 0.7);
+    box-shadow: 0 0 4px rgba(0, 220, 220, 0.4);
+}
+
+/* --- Barra CINE --- */
+.cine-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: #111c2e;
+    border-top: 1px solid #2d3748;
+    flex-wrap: wrap;
+}
+.cine-bar .btn-xs {
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    line-height: 1.5;
 }

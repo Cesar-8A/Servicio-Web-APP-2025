@@ -35,6 +35,7 @@ import panel as pn
 import matplotlib
 matplotlib.use('Agg') # Modo no interactivo para servidores
 import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.colors import LinearSegmentedColormap
 
@@ -105,182 +106,215 @@ def start_bokeh_server(panel_layout):
 
 # --- 5. LÓGICA DE VISUALIZACIÓN Y PROCESAMIENTO DICOM ---
 
+def _build_grid_3d(dicom_image, origin, spacing):
+    """Crea un grid PyVista submuestreado a max 256 voxels por eje para el visor 3D."""
+    _TARGET = 256
+    max_dim = max(dicom_image.shape)
+    if max_dim > _TARGET:
+        factor = _TARGET / max_dim
+        vol_3d = zoom(dicom_image, factor, order=1).astype(np.int16)
+        spacing_3d = tuple(s / factor for s in spacing)  # Menos voxels → spacing mayor
+    else:
+        vol_3d = dicom_image
+        spacing_3d = spacing
+    grid = pv.ImageData(dimensions=np.array(vol_3d.shape) + 1, origin=origin, spacing=spacing_3d)
+    grid.cell_data["values"] = vol_3d.flatten(order="F")
+    return grid.cell_data_to_point_data()
+
+
+def _make_plotter():
+    """Plotter off-screen mínimo — sin depth peeling ni MSAA (evita wglMakeCurrent en Windows)."""
+    plotter = pv.Plotter(off_screen=True)
+    plotter.set_background('#0a0e17', top='#111c2e')
+    return plotter
+
+
 def create_or_get_plotter(user_data):
-    """
-    Inicializa el plotter, procesa el volumen 3D y configura el panel.
-    """
-    if 'vtk_panel_column' in user_data:
-        return user_data['vtk_panel_column']
+    """Construye los grids 3D y precomputa isosuperficies para el visor PNG on-demand."""
+    if 'grid_3d' in user_data:
+        return True  # Ya inicializado
 
-    # --- 1. CREAR EL GRID (VOLUMEN 3D) ---
-    # Recuperamos la imagen procesada (HU)
     dicom_image = user_data.get('Image', np.array([]))
-    if dicom_image.size == 0: return None
+    if dicom_image.size == 0:
+        return False
 
-    # Recuperamos metadatos espaciales para que no se vea aplastado
     unique_id = user_data.get("unique_id")
     series_info = user_data.get('dicom_series', {}).get(unique_id, {})
-    
-    # Valores por defecto seguros
-    origin = series_info.get("ImagePositionPatient", [0,0,0])
+    origin     = series_info.get("ImagePositionPatient", [0, 0, 0])
     spacing_xy = series_info.get("PixelSpacing", [1, 1])
-    spacing_z = series_info.get("SliceThickness", 1)
-    spacing = (spacing_z, spacing_xy[0], spacing_xy[1])
+    spacing_z  = series_info.get("SliceThickness", 1)
+    spacing    = (spacing_z, spacing_xy[0], spacing_xy[1])
 
-    # Creamos el objeto PyVista (ImageData) con el volumen completo
     grid_full = pv.ImageData(dimensions=np.array(dicom_image.shape) + 1, origin=origin, spacing=spacing)
     grid_full.cell_data["values"] = dicom_image.flatten(order="F")
-    grid_full = grid_full.cell_data_to_point_data() # Necesario para contornos y volumen
-    
-    # GUARDAMOS EL GRID EN LA SESIÓN
-    user_data['grid_full'] = grid_full
-    # -------------------------------------
+    grid_full = grid_full.cell_data_to_point_data()
+    user_data['grid_full']      = grid_full
+    user_data['grid_3d']        = _build_grid_3d(dicom_image, origin, spacing)
+    user_data['_surface_cache'] = {}
+    user_data.setdefault('render_mode', 'isosurface')
 
-    # Configuración inicial del plotter
-    plotter = pv.Plotter(off_screen=True)
-    plotter.set_background("black")
-    plotter.enable_depth_peeling()
-    
-    panel_vtk = pn.pane.VTK(plotter.ren_win, width=400, height=500, name='vtk_pane')
-    panel_column = pn.Column(panel_vtk)
-    
-    # Guardamos los componentes en la sesión
-    user_data.update({
-        'vtk_plotter': plotter,
-        'vtk_panel': panel_vtk,
-        'vtk_panel_column': panel_column
-    })
-    
-    # Aplicamos el renderizado inicial
-    initial_mode = user_data.get('render_mode', 'isosurface')
-    update_3d_render(user_data, mode=initial_mode)
-    
-    return panel_column
+    _get_isosurfaces(user_data)  # Precomputa en background para que la primera petición sea rápida
+    return True
 
-def update_3d_render(user_data, mode):
+def _get_isosurfaces(user_data):
     """
-    Actualiza el 3D con los valores originales de visualización.
+    Calcula (o recupera del caché) las isosuperficies del volumen actual.
+    Usa el grid submuestreado (grid_3d) y decima si hay demasiados polígonos.
     """
-    plotter = user_data.get('vtk_plotter')
-    panel_vtk = user_data.get('vtk_panel')
-    grid = user_data.get('grid_full') 
+    cache = user_data.setdefault('_surface_cache', {})
     modality = user_data.get('modality', 'CT')
-    
-    if not plotter or not panel_vtk or grid is None: return
+    if cache:
+        return cache  # Ya calculadas
 
+    grid = user_data.get('grid_3d') or user_data.get('grid_full')
+    if grid is None:
+        return {}
+
+    try:
+        if modality == 'MR':
+            vals  = grid.point_data["values"]
+            p99   = float(np.percentile(vals[vals > 0], 99)) if np.any(vals > 0) else float(np.max(vals))
+            s_hi  = grid.contour([p99 * 0.65])
+            s_mid = grid.contour([p99 * 0.28])
+            if s_hi.n_points  > 40000: s_hi  = s_hi.decimate(0.85)
+            if s_mid.n_points > 60000: s_mid = s_mid.decimate(0.88)
+            cache.update({'high': s_hi, 'mid': s_mid})
+        else:
+            s_bone   = grid.contour([300])   # Hueso cortical
+            s_tissue = grid.contour([40])    # Músculo/tejido blando
+            s_skin   = grid.contour([-200])  # Contorno corporal
+            if s_bone.n_points   > 30000: s_bone   = s_bone.decimate(0.85)
+            if s_tissue.n_points > 50000: s_tissue = s_tissue.decimate(0.90)
+            if s_skin.n_points   > 80000: s_skin   = s_skin.decimate(0.88)
+            cache.update({'bone': s_bone, 'tissue': s_tissue, 'skin': s_skin})
+    except Exception:
+        pass
+
+    return cache
+
+
+def _populate_plotter(plotter, user_data, mode, view_angle='isometric'):
+    """Añade la geometría del modo actual al plotter y aplica el ángulo de cámara."""
+    grid_3d      = user_data.get('grid_3d') or user_data.get('grid_full')
+    modality     = user_data.get('modality', 'CT')
     current_cmap = user_data.get('current_cmap', 'bone')
-    plotter.clear()
-    
+
     if mode == 'isosurface':
+        surfs = _get_isosurfaces(user_data)
         try:
             if modality == 'MR':
-                # Lógica para MRI basada en intensidad máxima
-                data_values = grid.point_data["values"]
-                max_val = np.max(data_values)
-                surf_high = grid.contour([max_val * 0.60])
-                surf_tissue = grid.contour([max_val * 0.25])
-                plotter.add_mesh(surf_high, color="white", smooth_shading=True, name="high_signal")
-                plotter.add_mesh(surf_tissue, color="lightblue", opacity=0.3, smooth_shading=True, name="tissue")
+                s_hi  = surfs.get('high')
+                s_mid = surfs.get('mid')
+                if s_hi and s_hi.n_points > 0:
+                    plotter.add_mesh(s_hi, color='#f0f0f0', smooth_shading=True,
+                                     ambient=0.25, diffuse=0.75, specular=0.5, specular_power=20)
+                if s_mid and s_mid.n_points > 0:
+                    plotter.add_mesh(s_mid, color='#7ec8e3', opacity=0.25, smooth_shading=True,
+                                     ambient=0.3, diffuse=0.6, specular=0.2)
             else:
-                # Restauramos valores originales de CT (Ivan/Luis)
-                surface_bone = grid.contour([175]) 
-                surface_skin = grid.contour([-200]) 
-                plotter.add_mesh(surface_bone, color="white", smooth_shading=True, name="bone")
-                plotter.add_mesh(surface_skin, color="peachpuff", opacity=0.5, smooth_shading=True, name="skin")
-        except:
-            plotter.add_volume(grid, cmap=current_cmap, opacity="linear", blending="composite")
+                s_bone   = surfs.get('bone')
+                s_tissue = surfs.get('tissue')
+                s_skin   = surfs.get('skin')
+                if s_skin and s_skin.n_points > 0:
+                    plotter.add_mesh(s_skin, color='#e8c99a', opacity=0.18,
+                                     smooth_shading=True, ambient=0.3, diffuse=0.55, specular=0.15)
+                if s_tissue and s_tissue.n_points > 0:
+                    plotter.add_mesh(s_tissue, color='#c97b5a', opacity=0.22,
+                                     smooth_shading=True, ambient=0.25, diffuse=0.6, specular=0.15)
+                if s_bone and s_bone.n_points > 0:
+                    plotter.add_mesh(s_bone, color='#f2ece4', smooth_shading=True,
+                                     ambient=0.2, diffuse=0.7, specular=0.45, specular_power=18)
+        except Exception:
+            plotter.add_volume(grid_3d, cmap=current_cmap, opacity='sigmoid', blending='composite')
 
     elif mode in ['volume', 'mip', 'mip_inverted']:
-        blending = "maximum" if "mip" in mode else "composite"
-        cmap_to_use = current_cmap
+        blending   = 'maximum' if 'mip' in mode else 'composite'
+        cmap_use   = current_cmap
         if mode == 'mip_inverted':
-            cmap_to_use = f"{current_cmap}_r" if not current_cmap.endswith('_r') else current_cmap
-        
-        # Volvemos a la opacidad lineal que era más estable
-        plotter.add_volume(grid, cmap=cmap_to_use, opacity="linear", blending=blending)
+            cmap_use = f'{current_cmap}_r' if not current_cmap.endswith('_r') else current_cmap
+        opacity_fn = 'linear' if 'mip' in mode else 'sigmoid'
+        plotter.add_volume(grid_3d, cmap=cmap_use, opacity=opacity_fn, blending=blending)
 
-    # Re-dibujar RT Struct si existe
+    # Overlays RT y segmentación
     if 'RT' in user_data and 'RT_aligned' in user_data:
-        add_RT_to_plotter(user_data)
-        
-    # Re-dibujar Segmentación desde el sistema Multicapa
+        add_RT_to_plotter(user_data, _trigger=False)
     active_id = user_data.get('active_segmentation_id')
     if active_id and 'segmentations' in user_data and active_id in user_data['segmentations']:
         seg_mask = user_data['segmentations'][active_id]['mask']
         if seg_mask is not None and np.any(seg_mask):
             add_segmentation_to_plotter(user_data)
 
-    plotter.view_isometric()
-    panel_vtk.param.trigger('object')
+    if view_angle == 'front':
+        plotter.view_yz()
+    elif view_angle == 'side':
+        plotter.view_xz()
+    elif view_angle == 'top':
+        plotter.view_xy()
+    else:
+        plotter.view_isometric()
 
 
-def add_RT_to_plotter(user_data):
+def update_3d_render(user_data, mode):
+    """Guarda el modo activo y precomputa isosuperficies; el PNG se genera on-demand."""
+    user_data['render_mode'] = mode
+    if mode == 'isosurface':
+        _get_isosurfaces(user_data)
+
+
+def _build_rt_surface(user_data):
+    """Construye la superficie 3D de la máscara RT y la devuelve (o None si falla)."""
+    rt_data   = user_data.get('RT')
+    grid_full = user_data.get('grid_full')
+    if rt_data is None or grid_full is None:
+        return None
+    try:
+        rt_dims = np.array(rt_data.shape) + 1
+        rt_grid = pv.ImageData(dimensions=rt_dims, spacing=grid_full.spacing, origin=grid_full.origin)
+        rt_grid.cell_data["values"] = rt_data.flatten(order="F")
+        rt_grid = rt_grid.cell_data_to_point_data()
+        surface = rt_grid.contour([0.5])
+        return surface if surface.n_points > 0 else None
+    except Exception:
+        return None
+
+
+def add_RT_to_plotter(user_data, _trigger=True):
     """
-    Intenta añadir la máscara RT aplicando las transformaciones de ejes originales.
+    Guarda RT_aligned y, si hay un plotter activo, añade la superficie al render.
+    Funciona sin plotter activo (carga desde upload_RT): solo prepara los datos.
     """
+    if 'RT' not in user_data or user_data.get('grid_full') is None:
+        return False, "Faltan datos base (RT o grid)."
+
+    # Siempre guardar RT_aligned (necesario para overlays 2D y 3D posteriores)
+    user_data['RT_aligned'] = user_data['RT']
+
     plotter = user_data.get('vtk_plotter')
-    panel_vtk = user_data.get('vtk_panel')
-    grid_full = user_data.get('grid_full') 
-    
-    if not all([plotter, panel_vtk, 'RT' in user_data, grid_full]): 
-        return False, "Faltan datos base."
+    if plotter is None:
+        return True, "RT guardado — se mostrará en el próximo render."
 
     try:
-        # 1. Obtener datos crudos
-        rt_data = user_data['RT'] 
-        
-    
-        # -----------------------------------------------------
-
-        # 2. Crear la malla a la medida de los datos YA TRANSFORMADOS
-        rt_dims = np.array(rt_data.shape) + 1
-        
-        rt_grid = pv.ImageData(
-            dimensions=rt_dims, 
-            spacing=grid_full.spacing, 
-            origin=grid_full.origin
-        )
-        
-        # 3. Inyección de datos
-        # Usamos flatten order="F" (Fortran-style) que es estándar para VTK/PyVista
-        rt_grid.cell_data["values"] = rt_data.flatten(order="F")
-        
-        # Convertir a puntos para el contorno (corrección anterior)
-        rt_grid = rt_grid.cell_data_to_point_data()
-
-        # 4. Guardamos para 2D (Overlay)
-        # Para el 2D, usamos la misma transformación para que coincida
-        user_data['RT_aligned'] = rt_data
-
-        # 5. Crear contorno y añadir
-        surface = rt_grid.contour([0.5]) 
-        
-        plotter.remove_actor("rt_struct") 
+        surface = _build_rt_surface(user_data)
+        if surface is None:
+            return False, "No se generó superficie RT."
+        plotter.remove_actor("rt_struct")
         plotter.add_mesh(surface, color="red", opacity=0.5, name="rt_struct", smooth_shading=True)
-        
-        panel_vtk.param.trigger('object')
-        
-        msg = "Segmentación cargada (Ejes transformados)."
-        return True, msg
-
+        return True, "Segmentación RT cargada."
     except Exception as e:
-        error_msg = f"Error crítico RT: {str(e)}"
-        print(error_msg)
-        return False, error_msg
+        return False, f"Error al añadir RT al plotter: {e}"
     
 def add_segmentation_to_plotter(user_data):
     """
     Convierte la máscara de segmentación en un objeto 3D flotante.
     """
     plotter = user_data.get('vtk_plotter')
-    panel_vtk = user_data.get('vtk_panel')
     grid_full = user_data.get('grid_full')
     seg_mask = None
     active_id = user_data.get('active_segmentation_id')
     if active_id and 'segmentations' in user_data and active_id in user_data['segmentations']:
         seg_mask = user_data['segmentations'][active_id]['mask']
 
-    if not all([plotter, panel_vtk, grid_full is not None, seg_mask is not None]):
+    if not all([plotter, grid_full is not None, seg_mask is not None]):
         return False
 
     try:
@@ -491,23 +525,22 @@ def process_selected_dicom():
     spacing = (dz, dy, dx) # Z, Y, X (Ajustado a tu lógica de spacing)
 
     # Crear nuevo grid con el NUEVO paciente
+    image_hu  = user_data['Image']
     grid_full = pv.ImageData(dimensions=np.array(volume_raw.shape) + 1, origin=origin, spacing=spacing)
-    image_hu = user_data['Image']
     grid_full.cell_data["values"] = image_hu.flatten(order="F")
     grid_full = grid_full.cell_data_to_point_data()
-    
-    # Guardar el nuevo grid en la sesión
-    user_data['grid_full'] = grid_full
-    
-    # Si el visor 3D ya existía, forzamos su actualización visual AHORA MISMO
-    if 'vtk_plotter' in user_data:
-        # Limpiamos cualquier RT Struct viejo que hubiera
-        user_data.pop('RT', None)
-        user_data.pop('RT_aligned', None)
-        
-        # Redibujamos la escena con el nuevo paciente
-        current_mode = user_data.get('render_mode', 'isosurface')
-        update_3d_render(user_data, mode=current_mode)
+
+    # Grid submuestreado para visor 3D + limpiar caché de isosuperficies
+    grid_3d = _build_grid_3d(image_hu, origin, spacing)
+    user_data['grid_full']       = grid_full
+    user_data['grid_3d']         = grid_3d
+    user_data['_surface_cache']  = {}  # Nueva serie → isosuperficies obsoletas
+
+    # Precomputar isosuperficies para la nueva serie
+    user_data.pop('RT', None)
+    user_data.pop('RT_aligned', None)
+    current_mode = user_data.get('render_mode', 'isosurface')
+    update_3d_render(user_data, mode=current_mode)
         
     return jsonify({"mensaje": "Ok"})
 
@@ -624,12 +657,8 @@ def render(render):
     if image is None or image.size == 0:
         return render_template("render.html", success=0)
     
-    # Obtiene o crea el plotter y el layout de panel
-    panel_layout = create_or_get_plotter(user_data)
-    
-    # Inicia el servidor de Bokeh si es la primera vez
-    if panel_layout:
-        start_bokeh_server(panel_layout)
+    # Prepara los grids 3D y precomputa isosuperficies
+    create_or_get_plotter(user_data)
         
     dims = user_data.get("dims", (1, 1, 1))
     # Pasamos la variable 'render' a la plantilla
@@ -637,14 +666,20 @@ def render(render):
     modality = user_data.get('modality', 'CT')
     sequence = user_data.get('sequence', 'N/A')
 
-    # El cambio clave está aquí: 'render=render_type' se convierte en 'render=render'
+    unique_id = user_data.get('unique_id')
+    try:
+        sp_dx, sp_dy, sp_dz = _extract_spacing_for_series(unique_id, user_data)
+    except Exception:
+        sp_dx, sp_dy, sp_dz = 1.0, 1.0, 1.0
+
     return render_template("render.html", success=1, render=render,
                            max_value_axial=dims[0] - 1,
                            max_value_coronal=dims[1] - 1,
                            max_value_sagital=dims[2] - 1,
                            current_render_mode=current_mode,
                            modality=modality,
-                           sequence=sequence)
+                           sequence=sequence,
+                           sp_dx=sp_dx, sp_dy=sp_dy, sp_dz=sp_dz)
 @app.route("/ai/poc", methods=["POST"])
 def ai_poc():
 
@@ -657,21 +692,144 @@ def ai_poc():
 
     return jsonify(result)
 
+@app.route('/render_3d_frame')
+def render_3d_frame():
+    """Renderiza la escena 3D actual como PNG y lo devuelve al navegador."""
+    user_data  = get_user_data()
+    grid_3d    = user_data.get('grid_3d') or user_data.get('grid_full')
+    view_angle = request.args.get('view', 'isometric')
+
+    if grid_3d is None:
+        # Placeholder oscuro si todavía no hay datos
+        fig, ax = plt.subplots(figsize=(4, 5), facecolor='#0a0e17')
+        ax.text(0.5, 0.5, 'Sin datos 3D\nSube un estudio DICOM',
+                color='#4a7fc1', ha='center', va='center', transform=ax.transAxes,
+                fontsize=11, linespacing=1.7)
+        ax.axis('off')
+        buf = BytesIO()
+        fig.savefig(buf, format='png', facecolor='#0a0e17', bbox_inches='tight')
+        plt.close(fig)
+        buf.seek(0)
+        return send_file(buf, mimetype='image/png',
+                         max_age=0, conditional=False,
+                         download_name='placeholder.png')
+
+    mode    = user_data.get('render_mode', 'isosurface')
+    plotter = _make_plotter()
+    user_data['vtk_plotter'] = plotter   # necesario para los helpers de overlay
+
+    try:
+        _populate_plotter(plotter, user_data, mode, view_angle)
+        img_arr = plotter.screenshot(return_img=True)
+    finally:
+        plotter.close()
+        user_data.pop('vtk_plotter', None)
+
+    buf = BytesIO()
+    mpimg.imsave(buf, img_arr, format='png')
+    buf.seek(0)
+
+    response = send_file(buf, mimetype='image/png',
+                         max_age=0, conditional=False,
+                         download_name='render3d.png')
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return response
+
+
+@app.route('/render_3d_meshes')
+def render_3d_meshes():
+    """Exporta las isosuperficies como arrays binarios base64 para Three.js."""
+    import base64
+
+    user_data = get_user_data()
+    mode = user_data.get('render_mode', 'isosurface')
+
+    if mode != 'isosurface':
+        return jsonify({'mode': mode})
+
+    grid_3d = user_data.get('grid_3d') or user_data.get('grid_full')
+    if grid_3d is None:
+        return jsonify({'mode': 'empty'})
+
+    surfs    = _get_isosurfaces(user_data)
+    modality = user_data.get('modality', 'CT')
+
+    if modality == 'MR':
+        layers = [('high', '#f0f0f0', 1.0), ('mid', '#7ec8e3', 0.25)]
+    else:
+        layers = [('skin', '#e8c99a', 0.18), ('tissue', '#c97b5a', 0.22), ('bone', '#f2ece4', 1.0)]
+
+    def _export_surf(surf, color, opacity):
+        tri = surf.triangulate()
+        if tri.n_points == 0 or tri.n_cells == 0:
+            return None
+        verts     = tri.points.astype(np.float32)
+        raw_faces = tri.faces
+        n_faces   = len(raw_faces) // 4
+        if n_faces == 0:
+            return None
+        faces = raw_faces.reshape(n_faces, 4)[:, 1:].astype(np.uint32)
+        return {
+            'vertices': base64.b64encode(verts.tobytes()).decode(),
+            'nv':       int(len(verts)),
+            'faces':    base64.b64encode(faces.tobytes()).decode(),
+            'nf':       int(n_faces),
+            'color':    color,
+            'opacity':  opacity,
+        }
+
+    meshes_out = []
+
+    def _add_surf(surf, color, opacity, label):
+        if not surf or surf.n_points == 0:
+            return
+        try:
+            entry = _export_surf(surf, color, opacity)
+            if entry:
+                meshes_out.append(entry)
+                print(f"render_3d_meshes: {label} → {entry['nv']} verts, {entry['nf']} tris")
+        except Exception as exc:
+            print(f"render_3d_meshes: {label} error — {exc}")
+
+    for key, color, opacity in layers:
+        _add_surf(surfs.get(key), color, opacity, key)
+
+    # Overlay RT
+    if 'RT' in user_data and 'RT_aligned' in user_data:
+        _add_surf(_build_rt_surface(user_data), '#ff3333', 0.6, 'RT')
+
+    # Overlay segmentación activa
+    active_id = user_data.get('active_segmentation_id')
+    if active_id and 'segmentations' in user_data and active_id in user_data['segmentations']:
+        seg_mask  = user_data['segmentations'][active_id].get('mask')
+        grid_full = user_data.get('grid_full')
+        if seg_mask is not None and np.any(seg_mask) and grid_full is not None:
+            try:
+                seg_dims = np.array(seg_mask.shape) + 1
+                seg_grid = pv.ImageData(dimensions=seg_dims, spacing=grid_full.spacing, origin=grid_full.origin)
+                seg_grid.cell_data["values"] = seg_mask.flatten(order="F")
+                seg_grid = seg_grid.cell_data_to_point_data()
+                _add_surf(seg_grid.contour([1.0]), '#00ffff', 1.0, 'seg')
+            except Exception as exc:
+                print(f"render_3d_meshes: seg build error — {exc}")
+
+    print(f"render_3d_meshes: total mallas = {len(meshes_out)}")
+    return jsonify({'mode': 'isosurface', 'meshes': meshes_out})
+
+
 @app.route('/update_render_mode', methods=['POST'])
 def update_render_mode():
     user_data = get_user_data()
     data = request.json
-    
-    # Guardamos los nuevos valores
-    new_mode = data.get('mode')
-    new_cmap = data.get('cmap') 
-    
-    user_data['render_mode'] = new_mode
-    if new_cmap: user_data['current_cmap'] = new_cmap 
 
-    if 'vtk_plotter' in user_data:
+    new_mode = data.get('mode')
+    new_cmap = data.get('cmap')
+
+    if new_cmap:
+        user_data['current_cmap'] = new_cmap
+    if new_mode:
         update_3d_render(user_data, mode=new_mode)
-    
+
     return jsonify({"status": "success"})
 
 
