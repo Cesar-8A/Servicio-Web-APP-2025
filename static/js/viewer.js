@@ -57,7 +57,10 @@ document.addEventListener('DOMContentLoaded', function() {
         colormap: 'gray',
         lastVoxel: { x: null, y: null, z: null },
         activeSegmentationId: null,
-        segmentations: []
+        segmentations: [],
+        modality: null,
+        displayMin: -1024,
+        displayMax: 3071,
     };
 
     // --- POLYGON STATE ---
@@ -231,56 +234,64 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     // --- LÓGICA DE PRESETS CON FEEDBACK VISUAL ---
-    
+
+    const ALL_PRESET_IDS = ['presetBtnLung', 'presetBtnBone', 'presetBtnSoftTissue', 'presetBtnAuto', 'presetBtnFullRange'];
+
     // Función para resaltar el botón activo
     function highlightPreset(activeId) {
-        // Lista de IDs de los botones
-        const presets = ['presetBtnLung', 'presetBtnBone', 'presetBtnSoftTissue'];
-        
-        presets.forEach(id => {
+        ALL_PRESET_IDS.forEach(id => {
             const btn = document.getElementById(id);
             if (btn) {
-                // 1. Limpiamos el estilo activo de TODOS
                 btn.classList.remove('preset-active');
-                // 2. Volvemos al estilo gris por defecto
                 btn.classList.add('btn-outline-secondary');
             }
         });
-
-        // 3. Activamos SOLO el que se clickeó (si hay alguno)
         if (activeId) {
             const activeBtn = document.getElementById(activeId);
             if (activeBtn) {
-                activeBtn.classList.remove('btn-outline-secondary'); // Quitar gris
-                activeBtn.classList.add('preset-active'); // Poner azul médico
+                activeBtn.classList.remove('btn-outline-secondary');
+                activeBtn.classList.add('preset-active');
             }
         }
     }
 
-    // Listeners para Presets
+    // CT Preset listeners
     document.getElementById('presetBtnLung')?.addEventListener('click', () => {
         updateWWWC(1500, -600);
         highlightPreset('presetBtnLung');
     });
-    
+
     document.getElementById('presetBtnBone')?.addEventListener('click', () => {
         updateWWWC(2500, 480);
         highlightPreset('presetBtnBone');
     });
-    
+
     document.getElementById('presetBtnSoftTissue')?.addEventListener('click', () => {
         updateWWWC(400, 40);
         highlightPreset('presetBtnSoftTissue');
     });
-    
+
+    // MRI Preset listeners
+    document.getElementById('presetBtnAuto')?.addEventListener('click', () => {
+        fetchViewerConfig();
+        highlightPreset('presetBtnAuto');
+    });
+
+    document.getElementById('presetBtnFullRange')?.addEventListener('click', () => {
+        const wc = (viewState.displayMax + viewState.displayMin) / 2;
+        const ww = viewState.displayMax - viewState.displayMin;
+        updateWWWC(ww, wc);
+        highlightPreset('presetBtnFullRange');
+    });
+
     wwSlider?.addEventListener('input', () => {
         updateWWWC(parseInt(wwSlider.value), parseInt(wcSlider.value), 'sliders');
-        highlightPreset(null); // Apagar botones
+        highlightPreset(null);
     });
-    
+
     wcSlider?.addEventListener('input', () => {
         updateWWWC(parseInt(wwSlider.value), parseInt(wcSlider.value), 'sliders');
-        highlightPreset(null); // Apagar botones
+        highlightPreset(null);
     });
 
 
@@ -490,14 +501,17 @@ document.addEventListener('DOMContentLoaded', function() {
             const x = i * barWidth;
             const y = height - barHeight;
             
-            // --- COLOREADO ESTILO ITK ---
+            // --- COLOREADO: CT uses HU-based tissue colors; all other modalities use neutral gray ---
             const huVal = bin_edges[i];
-            let color = '#6c757d'; 
-            
-            if (huVal < -300) color = '#343a40';       // Aire: Gris oscuro
-            else if (huVal >= -150 && huVal < -30) color = '#ffc107'; // Grasa: Amarillo
-            else if (huVal >= 30 && huVal < 100) color = '#dc3545';   // Tejido: Rojo
-            else if (huVal >= 200) color = '#f8f9fa';  // Hueso: Blanco
+            let color = '#6c757d';
+
+            // HU-based tissue thresholds are CT-specific; MRI bars use uniform gray.
+            if (data.modality === 'CT') {
+                if (huVal < -300) color = '#343a40';
+                else if (huVal >= -150 && huVal < -30) color = '#ffc107';
+                else if (huVal >= 30   && huVal < 100) color = '#dc3545';
+                else if (huVal >= 200) color = '#f8f9fa';
+            }
             
             histCtx.fillStyle = color;
             
@@ -1206,6 +1220,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
                         // Update HU display panel with formatted output
                         if (huResult) {
+                            // MRI signal has no standardized physical unit, so the UH suffix is CT-only.
+                            const isCT       = viewState.modality === 'CT';
+                            const valueLabel = isCT ? 'Densidad:' : 'Señal:';
+                            const valueText  = isCT ? `${data.hu} UH` : `${data.hu}`;
                             huResult.innerHTML = `
                                 <div class="mb-1 lh-1">
                                     <span style="color: #bbbbbb; font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase;">Coordenadas:</span>
@@ -1218,8 +1236,8 @@ document.addEventListener('DOMContentLoaded', function() {
                                 </div>
 
                                 <div class="d-flex justify-content-between align-items-center pt-2" style="border-top: 1px solid #444;">
-                                    <span style="color: #bbbbbb; font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase;">Densidad:</span>
-                                    <span style="color: #0dcaf0; font-weight: bold; font-size: 1rem;">${data.hu} UH</span>
+                                    <span style="color: #bbbbbb; font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase;">${valueLabel}</span>
+                                    <span style="color: #0dcaf0; font-weight: bold; font-size: 1rem;">${valueText}</span>
                                 </div>
                             `;
                         }
@@ -2105,8 +2123,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- Lógica para iluminar botones de presets ---
+    // NOTE: ALL_PRESET_IDS is declared earlier in this file and includes MRI buttons.
     function highlightPreset(activeId) {
-        ['presetBtnLung', 'presetBtnBone', 'presetBtnSoftTissue'].forEach(id => {
+        ALL_PRESET_IDS.forEach(id => {
             const btn = document.getElementById(id);
             if (btn) {
                 btn.classList.remove('preset-active');
@@ -2160,8 +2179,48 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // --- MODALITY-AWARE CONFIG ---
+
+    function fetchViewerConfig() {
+        fetch('/get_viewer_config')
+            .then(r => { if (!r.ok) throw new Error('config unavailable'); return r.json(); })
+            .then(data => {
+                viewState.modality   = data.modality;
+                viewState.displayMin = data.display_min;
+                viewState.displayMax = data.display_max;
+
+                updateWWWC(data.initial_ww, data.initial_wc);
+
+                // Anchor the LUT editor endpoints to the actual data range, not hardcoded CT bounds.
+                contrastState.minHU = data.display_min;
+                contrastState.maxHU = data.display_max;
+                contrastState.points = [
+                    { x: data.display_min, y: 0 },
+                    { x: data.display_max, y: 255 }
+                ];
+                computeAndUpdateLUT();
+                applyModalityUI();
+            })
+            .catch(() => {}); // Silent fail — CT defaults remain active
+    }
+
+    function applyModalityUI() {
+        const ctPresets  = document.getElementById('ctPresets');
+        const mriPresets = document.getElementById('mriPresets');
+        if (!ctPresets || !mriPresets) return;
+
+        if (viewState.modality === 'CT') {
+            ctPresets.style.display  = '';
+            mriPresets.style.display = 'none';
+        } else {
+            // null modality (nothing loaded yet) falls through here — MRI preset panel is harmless default.
+            ctPresets.style.display  = 'none';
+            mriPresets.style.display = '';
+        }
+    }
+
     // --- INICIALIZACIÓN ---
-    
+
     // Usamos la nueva función para Ventana/Nivel
     bindWindowLevelInput('windowInput', 'ww'); 
     bindWindowLevelInput('levelInput', 'wc');
@@ -2206,6 +2265,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
+    fetchViewerConfig();
+
     const curveEditorWrapper = document.getElementById('curve-editor-wrapper');
     if(curveEditorWrapper){
         const curveResizeObserver = new ResizeObserver(entries => {

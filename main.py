@@ -374,6 +374,18 @@ def process_dicom_folder(directory, user_data):
                 series["ImagePositionPatient"] = dicom_data.ImagePositionPatient
                 series["PixelSpacing"] = dicom_data.PixelSpacing
                 series["SliceThickness"] = dicom_data.get("SliceThickness", 1)
+                series["Modality"] = str(getattr(dicom_data, 'Modality', 'CT'))
+                # WindowCenter/WindowWidth may hold multiple presets (MultiValue); always take the first.
+                _wc = getattr(dicom_data, 'WindowCenter', None)
+                _ww = getattr(dicom_data, 'WindowWidth', None)
+                try:
+                    series["WindowCenter"] = float(_wc[0]) if hasattr(_wc, '__len__') else float(_wc) if _wc is not None else None
+                except (TypeError, ValueError):
+                    series["WindowCenter"] = None
+                try:
+                    series["WindowWidth"] = float(_ww[0]) if hasattr(_ww, '__len__') else float(_ww) if _ww is not None else None
+                except (TypeError, ValueError):
+                    series["WindowWidth"] = None
                 for tag in series["Anonimize"]:
                     if hasattr(dicom_data, tag):
                         value = getattr(dicom_data, tag)
@@ -459,6 +471,45 @@ def process_selected_dicom():
         "scale_axial": s_ax, "scale_coronal": s_co, "scale_sagittal": s_sa
     })
 
+    # --- DISPLAY CONFIGURATION (Modality-aware windowing) ---
+    series_meta = user_data['dicom_series'][unique_id]
+    modality = series_meta.get('Modality', 'CT')
+    dicom_wc = series_meta.get('WindowCenter')
+    dicom_ww = series_meta.get('WindowWidth')
+
+    image_flat = user_data['Image'].flatten().astype(np.float32)
+    # Scanner background is zero-padded; excluding zeros prevents skewed percentiles.
+    non_zero = image_flat[image_flat != 0]
+    if non_zero.size == 0:
+        non_zero = image_flat
+
+    p0_5  = float(np.percentile(non_zero, 0.5))
+    p2    = float(np.percentile(non_zero, 2))
+    p98   = float(np.percentile(non_zero, 98))
+    p99_5 = float(np.percentile(non_zero, 99.5))
+
+    display_min = p0_5
+    display_max = p99_5
+    auto_wc = (p2 + p98) / 2.0
+    auto_ww = float(p98 - p2)
+
+    # Priority: DICOM-embedded window tags → CT physics default → percentile auto-window.
+    if dicom_wc is not None and dicom_ww is not None:
+        initial_wc, initial_ww = dicom_wc, dicom_ww
+    elif modality == 'CT':
+        initial_wc, initial_ww = 40.0, 400.0
+    else:
+        initial_wc, initial_ww = auto_wc, auto_ww
+
+    user_data.update({
+        'modality':    modality,
+        'initial_wc':  initial_wc,
+        'initial_ww':  initial_ww,
+        'display_min': display_min,
+        'display_max': display_max,
+    })
+    # ---------------------------------------------------------
+
     # Initialize segmentation data model
     user_data['segmentations'] = {}
     user_data['active_segmentation_id'] = None
@@ -495,42 +546,39 @@ def process_selected_dicom():
 
 @app.route('/get_histogram')
 def get_histogram():
-    """
-    Histograma Estilo ITK-SNAP:
-    - Rango fijo: -1024 a 1000.
-    - Resolución: 300 bins (rectángulos).
-    """
+    """Histograma estilo ITK-SNAP: rango y segmentos anatómicos adaptados a la modalidad."""
     user_data = get_user_data()
     image = user_data.get('Image')
     if image is None: return jsonify({"error": "No hay imagen"}), 404
     try:
         pixel_data = image.flatten()
-        
-        # 1. Configuración Estricta solicitada
-        min_hu, max_hu = -1024, 1000
-        num_bins = 300 # Cantidad de rectángulos
+        modality    = user_data.get('modality', 'CT')
+        display_min = user_data.get('display_min', -1024)
+        display_max = user_data.get('display_max', 1000)
+        num_bins = 300
 
-        # 2. Filtrar datos dentro del rango solicitado
-        # Los valores fuera de este rango se ignoran para el gráfico (como en ITK-SNAP)
-        valid_pixels = pixel_data[(pixel_data >= min_hu) & (pixel_data <= max_hu)]
+        valid_pixels = pixel_data[(pixel_data >= display_min) & (pixel_data <= display_max)]
+        counts, bin_edges = np.histogram(valid_pixels, bins=num_bins, range=[display_min, display_max])
 
-        # 3. Calcular histograma con 300 bins exactos
-        counts, bin_edges = np.histogram(valid_pixels, bins=num_bins, range=[min_hu, max_hu])
-        
-        # Segmentos anatómicos (Se mantienen igual para la info extra)
-        segments = {
-            "Aire": int(np.sum(valid_pixels < -300)),
-            "Grasa": int(np.sum((valid_pixels >= -120) & (valid_pixels < -30))),
-            "Tejido": int(np.sum((valid_pixels >= 30) & (valid_pixels < 60))),
-            "Hueso": int(np.sum(valid_pixels > 300))
-        }
+        # HU-based anatomical thresholds are physically meaningful only for CT.
+        segments = {}
+        if modality == 'CT':
+            segments = {
+                "Aire":   int(np.sum(valid_pixels < -300)),
+                "Grasa":  int(np.sum((valid_pixels >= -120) & (valid_pixels < -30))),
+                "Tejido": int(np.sum((valid_pixels >= 30)   & (valid_pixels < 60))),
+                "Hueso":  int(np.sum(valid_pixels > 300))
+            }
 
         return jsonify({
-            "mode": "tissue", # Usamos tissue para activar el modo de dibujo normal
-            "counts": counts.tolist(),
-            "bin_edges": bin_edges.tolist(),
-            "segments": segments,
-            "range": [min_hu, max_hu] # Enviamos el rango explícito
+            "mode":        "tissue",
+            "counts":      counts.tolist(),
+            "bin_edges":   bin_edges.tolist(),
+            "segments":    segments,
+            "range":       [display_min, display_max],
+            "modality":    modality,
+            "display_min": display_min,
+            "display_max": display_max,
         })
 
     except Exception as e:
@@ -607,6 +655,21 @@ def render(render):
                            max_value_coronal=dims[1] - 1,
                            max_value_sagital=dims[2] - 1,
                            current_render_mode=current_mode)
+
+@app.route('/get_viewer_config')
+def get_viewer_config():
+    """Returns modality-aware windowing config for the frontend on page load."""
+    user_data = get_user_data()
+    required = ['modality', 'initial_wc', 'initial_ww', 'display_min', 'display_max']
+    if not all(k in user_data for k in required):
+        return jsonify({"error": "No volume loaded"}), 400
+    return jsonify({
+        'modality':    user_data['modality'],
+        'initial_wc':  user_data['initial_wc'],
+        'initial_ww':  user_data['initial_ww'],
+        'display_min': user_data['display_min'],
+        'display_max': user_data['display_max'],
+    })
 
 @app.route('/update_render_mode', methods=['POST'])
 def update_render_mode():
