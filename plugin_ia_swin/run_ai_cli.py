@@ -5,6 +5,7 @@ import torchio as tio
 import numpy as np
 import SimpleITK as sitk
 import nibabel as nib
+import ants
 from monai.networks.nets import SwinUNETR
 from monai.inferers import sliding_window_inference
 
@@ -20,11 +21,12 @@ def main():
     sys.stdout = open(os.devnull, 'w')
     result = {"status": "error", "message": "Unknown error", "mask_path": None}
 
+    temp_files = []
+
     try:
         os.makedirs(args.out_dir, exist_ok=True)
 
         # 1. LECTURA NATIVA ESTRICTA
-        # Obtenemos el "molde" original del paciente
         dicom_dir = args.input if os.path.isdir(args.input) else os.path.dirname(args.input)
         reader = sitk.ImageSeriesReader()
         dicom_names = reader.GetGDCMSeriesFileNames(dicom_dir)
@@ -33,17 +35,32 @@ def main():
 
         nifti_in_path = os.path.join(args.out_dir, "input_vol_native.nii.gz")
         sitk.WriteImage(native_sitk, nifti_in_path)
+        temp_files.append(nifti_in_path)
+
+        # 1b. ANTs PREPROCESSING PIPELINE
+        img = ants.image_read(nifti_in_path)
+        img = ants.reorient_image2(img, orientation="RPI")
+        img_n4 = ants.n4_bias_field_correction(img, shrink_factor=3)
+
+        brain_mask = ants.get_mask(img_n4)
+
+        img_stripped = img_n4 * brain_mask
+        img_cropped = ants.crop_image(img_stripped, brain_mask)
+        img_final = ants.n4_bias_field_correction(img_cropped, shrink_factor=2)
+
+        preprocessed_nifti_path = os.path.join(args.out_dir, "ants_preprocessed.nii.gz")
+        ants.image_write(img_final, preprocessed_nifti_path)
+        temp_files.append(preprocessed_nifti_path)
 
         # 2. PREPARACIÓN PARA LA IA (TorchIO)
-        subject = tio.Subject(mri=tio.ScalarImage(nifti_in_path))
-        spatial_transform = tio.Compose([
+        subject = tio.Subject(mri=tio.ScalarImage(preprocessed_nifti_path))
+
+        full_transform = tio.Compose([
             tio.Resample(1.0),
+            tio.RescaleIntensity(out_min_max=(0, 1), percentiles=(0.1, 99.9), masking_method=lambda x: x > 0),
             tio.CropOrPad((160, 192, 160))
         ])
-        subj_spat = spatial_transform(subject)
-        
-        intensity_transform = tio.RescaleIntensity(out_min_max=(0, 1), percentiles=(0.1, 99.9))
-        subj_full = intensity_transform(subj_spat)
+        subj_full = full_transform(subject)
 
         # 3. INFERENCIA RED NEURONAL
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -53,21 +70,22 @@ def main():
 
         input_tensor = subj_full.mri.data.unsqueeze(0).to(device)
         with torch.no_grad():
-            logits = sliding_window_inference(input_tensor, roi_size=(96,96,96), sw_batch_size=4, predictor=model, overlap=0.5, mode="gaussian")
+            logits = sliding_window_inference(
+                input_tensor, roi_size=(96, 96, 96), sw_batch_size=4,
+                predictor=model, overlap=0.5, mode="gaussian"
+            )
 
-        # Obtenemos el array limpio
         mask_array = torch.argmax(logits, dim=1, keepdim=True).to(torch.uint8)[0, 0].cpu().numpy()
 
-        # 4. SOLUCIÓN AL BUG: PROYECCIÓN MATEMÁTICA AL ESPACIO NATIVO
-        # Pegamos el array a las coordenadas distorsionadas que dejó TorchIO
-        pred_nifti = nib.Nifti1Image(mask_array, subj_spat.mri.affine)
+        # 4. PROYECCIÓN MATEMÁTICA AL ESPACIO NATIVO
+        pred_nifti = nib.Nifti1Image(mask_array, subj_full.mri.affine)
         temp_mask_path = os.path.join(args.out_dir, "temp_mask.nii.gz")
         nib.save(pred_nifti, temp_mask_path)
+        temp_files.append(temp_mask_path)
 
-        # Usamos SimpleITK para estirar y acomodar esta máscara usando como molde al paciente original
         pred_sitk = sitk.ReadImage(temp_mask_path)
         resampler = sitk.ResampleImageFilter()
-        resampler.SetReferenceImage(native_sitk) # <- El secreto está aquí
+        resampler.SetReferenceImage(native_sitk)
         resampler.SetInterpolator(sitk.sitkNearestNeighbor)
         resampler.SetDefaultPixelValue(0)
         final_mask_sitk = resampler.Execute(pred_sitk)
@@ -84,6 +102,12 @@ def main():
         result["message"] = str(e)
 
     finally:
+        for tmp in temp_files:
+            if tmp and os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
         sys.stdout = sys.__stdout__
         print(json.dumps(result))
 
